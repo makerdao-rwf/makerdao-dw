@@ -74,7 +74,8 @@ contract = w3.eth.contract(address=addresses[0], abi=abi)
 
 # add tablename to abi json 
 dict_fn = {} ## Manage an index for disambuguation of functions with same names but different signature
-dict_fn_sign = {} # function signature to item (function or event) abi
+dict_evt = {} ## Manage an index for disambuguation of events  with same names but different signature
+dict_sign = {} # function /events signature to item (function or event) abi
 
 for j in abi:
   if j["type"] == "function" and j["stateMutability"] != "view":
@@ -89,21 +90,21 @@ for j in abi:
     else:
       j["table"] = contract_name + "_call_" + fn_name
       dict_fn[fn_name] = 0
-    dict_fn_sign[j["signature"]] = j
+    dict_sign[j["signature"]] = j
   elif j["type"] == "event" and j["anonymous"] != True:
     j["signature"] = eth_event.get_log_topic(j)
     fn_name = j["name"].lower()
     # If the name already exists, we add an index starting by 0 at the end of the function
-    if fn_name in dict_fn:
-      j["table"] = contract_name + "_evt_" + fn_name + str(dict_fn[fn_name])
-      dict_fn[fn_name] = dict_fn[fn_name]+1
+    if fn_name in dict_evt:
+      j["table"] = contract_name + "_evt_" + fn_name + str(dict_evt[fn_name])
+      dict_evt[fn_name] = dict_evt[fn_name]+1
     else:
       j["table"] = contract_name + "_evt_" + fn_name
-      dict_fn[fn_name] = 0
-    dict_fn_sign[j["signature"]] = j
+      dict_evt[fn_name] = 0
+    dict_sign[j["signature"]] = j
 
 #print(abi)
-print(dict_fn_sign)
+#print(dict_sign)
 # Initialize
 
 # create all tables if needed
@@ -166,7 +167,7 @@ while fromBlock < lastBlock:
 
         # CHeck if there is an ABI for such event
         try:
-          j = dict_fn_sign[t.topics[0].hex()]
+          j = dict_sign[t.topics[0].hex()]
         except KeyError:
           continue # Otherwise skip without error
         
@@ -205,6 +206,7 @@ while fromBlock < lastBlock:
         values = f"{t.blockNumber}, '\\{t.blockHash.hex()[1:]}', '\\{t.address[1:]}', {t.logIndex}, {t.transactionIndex}, '\\{t.transactionHash.hex()[1:]}' {values}"
 
         sql_insert = f"""insert into {schema}."{table_name}" values ({values})"""
+        print(sql_insert)
         session.execute(text(sql_insert))
         cnt += 1
   print(f"Inserted {cnt} lines")
