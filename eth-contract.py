@@ -16,8 +16,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-import binascii
-import hashlib
 import eth_event
 from pyhocon import ConfigFactory
 
@@ -192,7 +190,7 @@ while fromBlock < lastBlock:
           event_data = eth_event.decode_log(t, eth_event.get_topic_map(abi))
           for idx, event_param in enumerate(event_data["data"]):
             value = event_param["value"]
-            if j["inputs"][idx] == "address": # Addresses are giving in string but converted to binary array for space considerations
+            if j["inputs"][idx]["type"] == "address": # Addresses are giving in string but converted to binary array for space considerations
               values += ", '\\" + value[1:] + "'"
             elif isinstance(value, str):
               values += ", '" + str(value) +"'"
