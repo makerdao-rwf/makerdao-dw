@@ -30,7 +30,7 @@ You need to create a prod.conf or dev.conf (doesn't matter) that is based on tem
       database = "<db>"
     }
 
-Configuration is managed in [HOCON format](https://github.com/chimpler/pyhocon).
+Configuration is managed in [HOCON format](https://github.com/chimpler/pyhocon) which is a superset of JSON.
 
 ## Usage
 
@@ -71,6 +71,21 @@ block_number|block_hash                                                      |ad
 To add a new contract you need to provide configuration for the contract and its ABI.
 
 Contract ABI are stored in conf/*schema*/*contract*.abi. Schema are a way to group contracts related to a single project.
+
+Per schema/contracts group, a configuration file should be added under /conf/ and referenced from /config.conf.
+
+```json
+centrifuge {
+  shelf {
+    addresses : [
+        "0x7d057A056939bb96D682336683C10EC89b78D7CE" // New Silver 2
+        ,"0xA0B0d8394ADC79f5d1563a892abFc6186E519644" // Consol Freight 4
+      ]
+    creationBlock : 11063052
+    blocksStep : 10000 // optional to overload the default. x blocks should return less than 10k logs for the contract.
+  }
+}
+```
 
 ### Changing ABI / Correcting a bug in a contract
 
