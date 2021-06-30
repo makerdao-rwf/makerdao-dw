@@ -74,7 +74,7 @@ Contract ABI are stored in conf/*schema*/*contract*.abi. Schema are a way to gro
 
 Per schema/contracts group, a configuration file should be added under /conf/ and referenced from /config.conf.
 
-```json
+```javascript
 centrifuge {
   shelf {
     addresses : [
