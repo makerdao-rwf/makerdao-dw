@@ -16,8 +16,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-import binascii
-import hashlib
 import eth_event
 from pyhocon import ConfigFactory
 from datetime import datetime
