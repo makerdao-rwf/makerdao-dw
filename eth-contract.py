@@ -83,6 +83,7 @@ for j in abi:
     signature = '{}({})'.format(j['name'],','.join([input['type'] for input in j['inputs']]))
     # Functions signature use the 4 first bytes of the sha3 then 0
     j["signature"] = w3.sha3(text=signature)[0:4].hex() + '00000000000000000000000000000000000000000000000000000000'
+    # print(f"{j['name']}   {signature}   {j['signature']}")
     # If the name already exists, we add an index starting by 0 at the end of the function
     if fn_name in dict_fn:
       j["table"] = contract_name + "_call_" + fn_name + str(dict_fn[fn_name])
@@ -103,8 +104,8 @@ for j in abi:
       dict_evt[fn_name] = 0
     dict_sign[j["signature"]] = j
 
-#print(abi)
-#print(dict_sign)
+# print(abi)
+# print(dict_sign)
 # Initialize
 
 # create all tables if needed
@@ -114,6 +115,7 @@ common_columns = "block_number bigint, block_hash bytea, address bytea, log_inde
 type_mapping = {"address": "bytea", "bytes": "bytea", "bytes4": "bytea", "bytes32": "bytea", "int256": "numeric", "uint256": "numeric"}
 
 with engine.connect() as sql:
+  sql.execute(text(f"create schema if not exists {schema}"))
   for j in abi:
     if (j["type"] == "function" and j["stateMutability"] != "view") or (j["type"] == "event" and j["anonymous"] != True):
       table_name = j['table']
@@ -206,7 +208,7 @@ while fromBlock < lastBlock:
         values = f"{t.blockNumber}, '\\{t.blockHash.hex()[1:]}', '\\{t.address[1:]}', {t.logIndex}, {t.transactionIndex}, '\\{t.transactionHash.hex()[1:]}' {values}"
 
         sql_insert = f"""insert into {schema}."{table_name}" values ({values})"""
-        print(sql_insert)
+        # print(sql_insert)
         session.execute(text(sql_insert))
         cnt += 1
   print(f"Inserted {cnt} lines")
