@@ -5,7 +5,7 @@ ETL for MakerDAO RWF Core Unit Data Warehouse.
 
 ## Installation
 
-Require Python 3|.
+Require Python 3+.
 
 You will need PostgreSQL dev libs. If under Ubuntu 20.04:
 
@@ -19,7 +19,7 @@ You will also need a Infura key and access to a PostgreSQL database.
 
 ## Configuration
 
-You need to create a prod.conf or dev.conf (doesn't matter) that is based on template.conf. Current
+You need to create a prod.conf or dev.conf (doesn't matter) that is based on template.conf. 
 
     infura_key = 'xxxxxxxxxxxxx'
 
@@ -72,7 +72,7 @@ To add a new contract you need to provide configuration for the contract and its
 
 Contract ABI are stored in conf/*schema*/*contract*.abi. Schema are a way to group contracts related to a single project.
 
-Per schema/contracts group, a configuration file should be added under /conf/ and referenced from /config.conf.
+Per schema/contracts group, a configuration file should be added under /conf/ and referenced from /config.conf. For instance /conf/centrifuge.conf:
 
 ```javascript
 centrifuge {
