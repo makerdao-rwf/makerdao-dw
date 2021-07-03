@@ -110,7 +110,7 @@ for j in abi:
 
 common_columns = "block_number bigint, block_hash bytea, address bytea, log_index int, transaction_index int, transaction_hash bytea"
 
-type_mapping = {"address": "bytea", "bytes": "bytea", "bytes4": "bytea", "bytes32": "bytea", "int256": "numeric", "uint256": "numeric"}
+type_mapping = {"address": "bytea", "bytes": "bytea", "bytes4": "bytea", "bytes32": "bytea", "int256": "numeric", "uint256": "numeric", "uint8": "int", "uint16": "int", "bool": "boolean"}
 
 with engine.connect() as sql:
   sql.execute(text(f"create schema if not exists {schema}"))
