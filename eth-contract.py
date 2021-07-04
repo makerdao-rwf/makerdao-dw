@@ -1,7 +1,3 @@
-# NOTE: The first time running this from colab: uncomment the two lines below and run the cell. Then comment them again, restart the runtime, and run this cell again.
-#!pip install --force-reinstall jsonschema==3.2.0
-#!pip install web3
-
 import json
 from io import StringIO
 import urllib3
@@ -18,27 +14,25 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 import eth_event
 from pyhocon import ConfigFactory
-
-
-
 import argparse
 
+# Allow user to input contract in terminal command
 parser = argparse.ArgumentParser(description='Parse a contract on the Ethereum blockchain and store logs on a database.')
-parser.add_argument('contract', 
-                    help='name of the contract to parse like makermcd.vat (<schema>.<contract>)')
-
+parser.add_argument('contract', help='name of the contract to parse like makermcd.vat (<schema>.<contract>)')
 args = parser.parse_args()
-schema, contract_name = args.contract.split(".")
 
+schema, contract_name = args.contract.split(".")
 print(f"Parsing contract {schema}.{contract_name}")
 
 conf = ConfigFactory.parse_file('config.conf')
 
+
 ## Environment parameters
 infura_key = conf["infura_key"]
 fromBlock = conf["contracts"][schema][contract_name]["creationBlock"]
+#fromBlock = 12736124
 
-# Number of block per call (too big can lead to errors, to low can be too long)
+# Number of block per call (too big can lead to errors, too low can be too long)
 blocksStep = conf.get(f"contracts.{schema}.{contract_name}.blocksStep", conf["blocksStep"])
 
 
@@ -57,17 +51,9 @@ with open(f"conf/{schema}/{contract_name}.abi") as f:
 # Connect to PostgreSQL
 engine = create_engine('postgresql://'+db_user+':'+db_password+'@'+db_host+':5432/'+db_db) 
 
-
-
-# Set w3 source to Infura Mainnet
+# Set w3 source to Infura Mainnet and init contract
 w3 = Web3(Web3.HTTPProvider('https://mainnet.infura.io/v3/' + infura_key)) 
-
-
-
-# Set VAT contract address https://etherscan.io/address/0x35d1b3f3d7966a1dfe207aa4514c12a259a0492b#code
 addresses = [w3.toChecksumAddress(a) for a in addresses]
-
-# template contract (the first address)
 contract = w3.eth.contract(address=addresses[0], abi=abi)
 
 # add tablename to abi json 
@@ -107,9 +93,7 @@ for j in abi:
 # Initialize
 
 # create all tables if needed
-
 common_columns = "block_number bigint, block_hash bytea, address bytea, log_index int, transaction_index int, transaction_hash bytea"
-
 type_mapping = {"address": "bytea", "bytes": "bytea", "bytes4": "bytea", "bytes32": "bytea", "int256": "numeric", "uint256": "numeric"}
 
 with engine.connect() as sql:
@@ -153,6 +137,7 @@ print(f"Start from block {fromBlock}")
 
 lastBlock = w3.eth.block_number
 
+# Fetch event data from each block
 while fromBlock < lastBlock:
   toBlock = fromBlock + blocksStep
   if(toBlock > lastBlock):
@@ -162,10 +147,11 @@ while fromBlock < lastBlock:
   # Make sure we treat block as atomic so even if it crashes, we only have a full block or non
   with sessionmaker(engine).begin() as session: 
     for address in addresses:
-      # TODO: manage to many results errors and manage the number of blocks automatically
+      # TODO: manage too many results errors and manage the number of blocks automatically
       for t in w3.eth.get_logs({'fromBlock': fromBlock, 'toBlock': toBlock, 'address': address}):
+        print(t)
 
-        # CHeck if there is an ABI for such event
+        # Check if there is an ABI for such event
         try:
           j = dict_sign[t.topics[0].hex()]
         except KeyError:
@@ -173,10 +159,42 @@ while fromBlock < lastBlock:
         
         table_name = j["table"]
         values = ""
-        
+
         if j["type"] == "function" and j["stateMutability"] != "view":
-          inputs = contract.decode_function_input('0x' + t['data'][130:])
-          params = inputs[1].values()
+
+          #### ADDED #### Convert each event's input data to a readable format. Try multiples of 32 + 2 ? e.g. 34, 66, 98, 130, 162, 194, 226, 258, 290, etc.
+          x=2
+          inputs = None
+          print(t['data'])
+
+          while inputs is None:
+            try:
+              input_data = '0x' + t['data'][x:]
+              #print(input_data)
+              inputs = contract.decode_function_input(input_data)
+              params = inputs[1].values()
+              print(inputs)
+            except ValueError:    #If you get the 'could not find any function with matching selector' error, then the input data is incorrectly formatted for 'decode_function_input'. This may happen when there are a large number of topic fields. The below code truncates the input data to make it accepted by the decode_input_function.
+              x = x+32 #or x=x+1 if that doesn't work?
+              if input_data == '0x': #If the string is never able to be read by 'decode_function_input' (and it just truncates to 0x), then it may be a proxy contract
+                
+                ### ADDED ###
+                #try:
+                  #Make this all a single function
+                #  tx_input_data = w3.eth.get_transaction(t['transactionhash'])
+                #  tx_input_data = str(tx_input_data['input']) #The log's data in topic[0] (e.g. 0x5b8f46461c1dd69fb968f1a003acee221ea3e19540e350233b612ddb43433b55) cannot be decoded to the methodid because this is a keccak encoding of the methodid
+                #  event_input_data = tx_input_data[:10] + t['data'][2:]
+                #  print(event_input_data)
+                  # Here, you need to try many different ABIs
+                #  decoded = contract.decode_function_input(input_data)
+                #except ValueError:
+                #  pass
+                
+                inputs = 'cannot read input data'
+                print(inputs)
+                x=2
+              pass
+
           for idx, value in enumerate(params):
             if j["inputs"][idx]["type"] == "address": # Addresses are giving in string but converted to binary array for space considerations
               values += ", '\\" + value[1:] + "'"
@@ -211,4 +229,3 @@ while fromBlock < lastBlock:
         cnt += 1
   print(f"Inserted {cnt} lines")
   fromBlock = toBlock + 1 
-

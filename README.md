@@ -5,7 +5,7 @@ ETL for MakerDAO RWF Core Unit Data Warehouse.
 
 ## Installation
 
-Require Python 3+.
+Require Python 3|.
 
 You will need PostgreSQL dev libs. If under Ubuntu 20.04:
 
@@ -19,7 +19,7 @@ You will also need a Infura key and access to a PostgreSQL database.
 
 ## Configuration
 
-You need to create a prod.conf or dev.conf (doesn't matter) that is based on template.conf. 
+You need to create a prod.conf or dev.conf (doesn't matter) that is based on template.conf. Current
 
     infura_key = 'xxxxxxxxxxxxx'
 
@@ -38,7 +38,7 @@ Configuration is managed in [HOCON format](https://github.com/chimpler/pyhocon) 
 
 The following command will update the ethereum.blocks table (and create the schema/table if needed).
 
-    python eth-block.py 
+    python eth-blocks.py 
 
 The table will have the following format:
 
@@ -72,7 +72,7 @@ To add a new contract you need to provide configuration for the contract and its
 
 Contract ABI are stored in conf/*schema*/*contract*.abi. Schema are a way to group contracts related to a single project.
 
-Per schema/contracts group, a configuration file should be added under /conf/ and referenced from /config.conf. For instance /conf/centrifuge.conf:
+Per schema/contracts group, a configuration file should be added under /conf/ and referenced from /config.conf.
 
 ```javascript
 centrifuge {
@@ -86,6 +86,7 @@ centrifuge {
   }
 }
 ```
+Once added, you will need to add your new .config file to the contract list in "config.conf".
 
 ### Changing ABI / Correcting a bug in a contract
 
