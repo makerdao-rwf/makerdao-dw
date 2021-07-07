@@ -65,6 +65,32 @@ dict_evt = {} ## Manage an index for disambuguation of events  with same names b
 dict_sign = {} # function /events signature to item (function or event) abi
 
 
+def get_function_data(t):
+  # Convert each event's input data to a readable format. Try multiples of 2 + 32: e.g. 34, 66, 98, 130, etc.
+  x=2
+  inputs = None
+
+  while inputs is None:
+    try:
+      #print(t['transactionHash'])
+      input_data = '0x' + t['data'][x:]
+      inputs = contract.decode_function_input(input_data)
+      params = inputs[1].values()
+      #print(inputs)
+      
+    except ValueError:    #If you get the 'could not find any function with matching selector' error, then the input data is incorrectly formatted for 'decode_function_input'. This may happen when there are too many topic fields. Thise truncates the input data to make it accepted by the decode_input_function.
+      x = x+32 #or x=x+1 if that doesn't work?
+      #print(input_data)
+
+      if input_data == '0x': #If the string is never able to be read 'decode_function_input' (and it just truncates to 0x)
+        print('Cannot read input data. The following input data may be invalid.' + t['data'])
+        x=2
+        #inputs = 1
+        
+      pass
+      
+  return inputs, params
+
 # Retrieve proxy address and ABI. NOTE: Etherscan only allows 100 'verifyproxycontract' calls per day
 def get_proxy(proxy_address):
 
@@ -80,7 +106,6 @@ def get_proxy(proxy_address):
   # Second API call. Use 'guid' to retrieve proxy contract address
   params2 = (('module', 'contract'),('action', 'checkproxyverification'),('guid', result),('apikey', 'M36N6D99NY4U4E1GEIYYFYIERRR1MF5S8F'),)
   response = requests.get('https://api.etherscan.io/api', params=params2)
-  #print(response.text)
   proxy_address = response.text.split("contract is found at ",1)[1].split(" and is ")[0] #extract proxy address from response
   time.sleep(5)
 
@@ -89,7 +114,6 @@ def get_proxy(proxy_address):
   abi = json.loads(requests.get(response).json()['result'])
   response = 'https://api.etherscan.io/api?module=contract&action=getsourcecode&address=' + proxy_address + '&apikey=M36N6D99NY4U4E1GEIYYFYIERRR1MF5S8F'
   contract_name = json.loads(requests.get(response).text)['result'][0]['ContractName']
-  #abi = requests.get(response).json()['result'][0]['ABI'] #outputs as string rather than list...
   return proxy_address, abi, contract_name
 
 #### Add feature #### Permanently save the proxy contract and address combination to SQL. Read from there first before doing the above function.
@@ -218,45 +242,17 @@ while fromBlock < lastBlock:
         values = ""
 
         if j["type"] == "function" and j["stateMutability"] != "view": #Read functions that change blockchain state
+          # Decode the input data
 
-          # Convert each event's input data to a readable format. Try multiples of 2 + 32: e.g. 34, 66, 98, 130, etc.
-          x=2
-          inputs = None
-          print('function', j['name'])
+          try:
+            inputs, params = get_function_data(t) 
+            print("inputs:", inputs, "\n params:", params)
+          except:
+            pass
 
-          while inputs is None:
-            try:
-              input_data = '0x' + t['data'][x:]
-              inputs = contract.decode_function_input(input_data)
-              params = inputs[1].values()
-              #print(inputs)
-            except ValueError:    #If you get the 'could not find any function with matching selector' error, then the input data is incorrectly formatted for 'decode_function_input'. This may happen when there are too many topic fields. Thise truncates the input data to make it accepted by the decode_input_function.
-              x = x+32 #or x=x+1 if that doesn't work?
-              #print(x)
-              if input_data == '0x': #If the string is never able to be read 'decode_function_input' (and it just truncates to 0x)
-                
-                # If you want to decode functions with statemutability = view #
-                '''
-                try: #Note, this is pseudocode
-                  # Get this log's function signature
-                  input_data = inputs
-                  input_data = input_data[:10] + t['data'][2:]
-                  # Append the correct signature
-                  methodid = contract.get_function_by_name(j['name'])
-                  event_input_data = methodid + input_data
-                  print(event_input_data)
-                  # Decode it
-                  decoded = contract.decode_function_input(event_input_data)
-                except ValueError:
-                  pass
-                '''
-                inputs = 'cannot read input data for '
-                print(inputs, t['data'])
-                x=2
-              pass
-
+          # Add to SQL
           for idx, value in enumerate(params):
-            #print('things', idx, value)
+            #if IndexError, list index out of range, then it's bc/ one of your params has an additional value in it ... figure out how these should be handled
             if j["inputs"][idx]["type"] == "address": # Addresses are given as string but converted to binary array for space considerations
               values += ", '\\" + value[1:] + "'"
             elif isinstance(value, str):
@@ -266,6 +262,9 @@ while fromBlock < lastBlock:
             else:
               values += ", " + str(value)
           #print(values)
+
+        if j["type"] == "function" and j["stateMutability"] == "view":
+          print("this isnt reading certain mutable functions?")
 
         # Decode events      
         elif j["type"] == "event" and j["anonymous"] != True:
