@@ -1,0 +1,25 @@
+<datawarehouse>
+  <process name="eth_update">
+    <task shellCommand="eth-contract" onError="warning">
+       <parameter value="makermcd.cat"/>
+    </task>
+    <task shellCommand="eth-contract" onError="warning">
+       <parameter value="makermcd.dssflash"/>
+    </task>
+    <task shellCommand="eth-contract" onError="warning">
+       <parameter value="makermcd.flapper"/>
+    </task>
+    <task shellCommand="eth-contract" onError="warning">
+       <parameter value="makermcd.jug"/>
+    </task>
+    <task shellCommand="eth-contract" onError="warning">
+       <parameter value="makermcd.psm"/>
+    </task>
+    <task shellCommand="eth-contract" onError="warning">
+       <parameter value="makermcd.vow"/>
+    </task>
+    <task shellCommand="eth-contract" onError="warning">
+       <parameter value="makermcd.vat"/>
+    </task>
+  </process>
+</datawarehouse>
