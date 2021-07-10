@@ -19,6 +19,9 @@ import warnings
 import requests
 import time
 
+from functions import get_abi
+
+
 # Allow user to input contract in terminal command
 parser = argparse.ArgumentParser(description='Parse a contract on the Ethereum blockchain and store logs on a database.')
 parser.add_argument('contract', help='name of the contract to parse like makermcd.vat (<schema>.<contract>)')
@@ -38,19 +41,19 @@ fromBlock = conf["contracts"][schema][contract_name]["creationBlock"]
 # Number of block per call (too big can lead to errors, too low can be too long)
 blocksStep = conf.get(f"contracts.{schema}.{contract_name}.blocksStep", conf["blocksStep"])
 
-
 ## Input parameters
 db_host = conf["db.host"]
 db_user = conf["db.user"]
 db_password = conf["db.password"]
 db_db = conf["db.database"]
-
 addresses = conf["contracts"][schema][contract_name]["addresses"]
+print(addresses)
 
-# Loading the ABI json file
-with open(f"conf/{schema}/{contract_name}.abi") as f:
-  abi = json.load(f)
 
+# I think you have to put this under 'for address in addresses' below. 
+for address in addresses: # This only gets the last address. Get all
+  address, abi, contract_name = get_abi(address, schema, contract_name)
+  
 # Connect to PostgreSQL
 engine = create_engine('postgresql://'+db_user+':'+db_password+'@'+db_host+':5432/'+db_db) 
 
@@ -91,33 +94,6 @@ def get_function_data(t):
       
   return inputs, params
 
-# Retrieve proxy address and ABI. NOTE: Etherscan only allows 100 'verifyproxycontract' calls per day
-def get_proxy(proxy_address):
-
-  # First API call to get a 'guid'
-  params = (('module', 'contract'),('action', 'verifyproxycontract'),('apikey', 'M36N6D99NY4U4E1GEIYYFYIERRR1MF5S8F'),) #Your Etherscan API key
-  data = {'address': proxy_address}
-  response = requests.post('https://api.etherscan.io/api', params=params, data=data).json()
-  result = response['result'] 
-
-  # We need to wait between API calls on Etherscan or else it'll throw an error message
-  time.sleep(8)
-
-  # Second API call. Use 'guid' to retrieve proxy contract address
-  params2 = (('module', 'contract'),('action', 'checkproxyverification'),('guid', result),('apikey', 'M36N6D99NY4U4E1GEIYYFYIERRR1MF5S8F'),)
-  response = requests.get('https://api.etherscan.io/api', params=params2)
-  proxy_address = response.text.split("contract is found at ",1)[1].split(" and is ")[0] #extract proxy address from response
-  time.sleep(5)
-
-  # Get ABI and contract name from the proxy contract
-  response = 'https://api.etherscan.io/api?module=contract&action=getabi&address='+ proxy_address + '&apikey=M36N6D99NY4U4E1GEIYYFYIERRR1MF5S8F'
-  abi = json.loads(requests.get(response).json()['result'])
-  response = 'https://api.etherscan.io/api?module=contract&action=getsourcecode&address=' + proxy_address + '&apikey=M36N6D99NY4U4E1GEIYYFYIERRR1MF5S8F'
-  contract_name = json.loads(requests.get(response).text)['result'][0]['ContractName']
-  return proxy_address, abi, contract_name
-
-#### Add feature #### Permanently save the proxy contract and address combination to SQL. Read from there first before doing the above function.
-
 #From the ABI, get function and event names j['name']
 def get_abi_params(abi):
   for j in abi:
@@ -153,11 +129,10 @@ def get_abi_params(abi):
 def create_schema (abi):
   # create all tables if needed
   common_columns = "block_number bigint, block_hash bytea, address bytea, log_index int, transaction_index int, transaction_hash bytea"
-  type_mapping = {"address": "bytea", "bytes": "bytea", "bytes4": "bytea", "bytes32": "bytea", "int256": "numeric", "uint256": "numeric", "uint16":"numeric", "bool": "boolean"}
+  type_mapping = {"address": "bytea", "bytes": "bytea", "bytes4": "bytea", "bytes32": "bytea", "int256": "numeric", "uint256": "numeric", "uint16":"numeric", "bool": "boolean", "address[]":"bytea", "uint256[]":"numeric"}
 
   with engine.connect() as sql:
-    print("reading contract", schema, contract_name)
-    sql.execute(text(f"create schema if not exists {schema}")) #** Will this create a new schema w/ proxy contracts?
+    sql.execute(text(f"create schema if not exists {schema}")) 
     for j in abi:
       # Collect all functions and events from the ABI (I think)
       if (j["type"] == "function" and j["stateMutability"] != "view") or (j["type"] == "event" and j["anonymous"] != True):
@@ -173,7 +148,11 @@ def create_schema (abi):
             if col_name == "":
               col_name = f"v{unnamed_col_idx}"
               unnamed_col_idx += 1
-            columns += ', "'+col_name+'"' + " " + type_mapping[i["type"]] #map the type from the ABI to the sql type in the 'type_mapping' dict
+            try:
+              columns += ', "'+col_name+'"' + " " + type_mapping[i["type"]] #map the type from the ABI to the sql type in the 'type_mapping' dict
+            except KeyError:
+              print("There is probably an unsupported datatype You can add more to the type_mapping dict above")
+              raise
           sql_create_table = f"""create table {schema}."{table_name}" ( {columns} )"""
           print(sql_create_table)
           sql.execute(text(sql_create_table))
@@ -197,8 +176,8 @@ with engine.connect() as sql:
 
 print(f"Start from block {fromBlock}")
 
-
 lastBlock = w3.eth.block_number
+
 
 # Fetch event data from each block
 while fromBlock < lastBlock:
@@ -212,35 +191,19 @@ while fromBlock < lastBlock:
     for address in addresses:
       # TODO: manage too many results errors and manage the number of blocks automatically
       for t in w3.eth.get_logs({'fromBlock': fromBlock, 'toBlock': toBlock, 'address': address}):
-        #print(t)
+        print(t)
 
         # Check if there is an event in the existing contract's ABI for this log
         try:
           j = dict_sign[t.topics[0].hex()]
-
         # If there isn't, this may be a proxy contract. Check to see if we have a proxy contract/abi. If not, get it.
         except KeyError:
+          print('Topic was not found in the ABI')
+          pass
 
-          try: 
-            proxy_address #Check if get_proxy has been run yet
-            print(t.topics[0].hex())
-            print('this is j', j)
-            continue
-          except NameError:
-            proxy_address, abi, contract_name = get_proxy(address) #or addresses?
-            print("Now checking events from proxy address: ", proxy_address)
-            #print("The new ABI is", abi)
-
-            # Using the proxy contract, create a new dictionary of ABI events/functions and a new SQL schema if necessary
-            j = get_abi_params(abi)  
-            create_schema(abi)
- 
-          # Using data from the new contract, rerun the above code - placing events and functions.
-          continue
-        
         table_name = j["table"] #Set table_name equal to the key of 'topics[0]' in the ABI (I think)
         values = ""
-
+  
         if j["type"] == "function" and j["stateMutability"] != "view": #Read functions that change blockchain state
           # Decode the input data
 
@@ -250,21 +213,24 @@ while fromBlock < lastBlock:
           except:
             pass
 
-          # Add to SQL
-          for idx, value in enumerate(params):
-            #if IndexError, list index out of range, then it's bc/ one of your params has an additional value in it ... figure out how these should be handled
-            if j["inputs"][idx]["type"] == "address": # Addresses are given as string but converted to binary array for space considerations
-              values += ", '\\" + value[1:] + "'"
-            elif isinstance(value, str):
-              values += ", '" + str(value) +"'"
-            elif isinstance(value, bytes):
-              values += ", '\\x" + value.hex() + "'"
-            else:
-              values += ", " + str(value)
-          #print(values)
+          # Encode parameters
+          try:
+            for idx, value in enumerate(params):
+              #if IndexError, list index out of range, then it's bc/ one of your params has an additional value in it ... figure out how these should be handled
+              if j["inputs"][idx]["type"] == "address": # Addresses are given as string but converted to binary array for space considerations
+                values += ", '\\" + value[1:] + "'"
+              elif isinstance(value, str): # returns true if value is a string
+                values += ", '" + str(value) +"'"
+              elif isinstance(value, bytes):
+                values += ", '\\x" + value.hex() + "'"
+              else:
+                values += ", " + str(value)
+          except:
+            print('Could not parse', params)
+            continue #If it can't parse, just skip it. Is that okay?
 
-        if j["type"] == "function" and j["stateMutability"] == "view":
-          print("this isnt reading certain mutable functions?")
+        #if j["type"] == "function" and j["stateMutability"] == "view":
+        #  print("this isnt reading certain mutable functions?")
 
         # Decode events      
         elif j["type"] == "event" and j["anonymous"] != True:
@@ -272,7 +238,7 @@ while fromBlock < lastBlock:
           
           for idx, event_param in enumerate(event_data["data"]):
             value = event_param["value"]
-            if j["inputs"][idx]["type"] == "address": # Addresses are giving in string but converted to binary array for space considerations
+            if j["inputs"][idx]["type"] == "address": # Addresses are given in string but converted to binary array for space considerations
               values += ", '\\" + value[1:] + "'"
             elif isinstance(value, str):
               values += ", '" + str(value) +"'"
@@ -286,18 +252,17 @@ while fromBlock < lastBlock:
         # block_number bigint, block_hash bytea, address text, log_index int, transaction_index int, transaction_hash bytea"
         ## Preprend the common columns
         values = f"{t.blockNumber}, '\\{t.blockHash.hex()[1:]}', '\\{t.address[1:]}', {t.logIndex}, {t.transactionIndex}, '\\{t.transactionHash.hex()[1:]}' {values}"
-
         sql_insert = f"""insert into {schema}."{table_name}" values ({values})"""
-        # print(sql_insert)
-        session.execute(text(sql_insert))
+        print(text(sql_insert))
+
+        #session.execute(text(sql_insert)) # *** Uncomment when you want to submit or post to the database
+
         cnt += 1
-  print(f"Inserted {cnt} lines")
+
+  print(f"Inserted {cnt} lines into {schema}.{table_name}")
   fromBlock = toBlock + 1 
 
 
-
-# List of all Maker contracts: https://etherscan.io/accounts/label/maker?subcatid=undefined&size=25&start=0&col=1&order=asc
-# List of all Maker contracts in case you need it. https://github.com/duneanalytics/abstractions/blob/master/ethereum/makermcd/collateral_addresses.sql
-
-#print(contract.all_functions())
-#print(contract.events())
+#NOTES
+# 2. double check flashloan_call and other mutable functions (that they're actually reading+writing)
+# 3. 
