@@ -68,8 +68,11 @@ def get_abi_params(abi, contract_name, w3):
     if j["type"] == "function" and j["stateMutability"] != "view":
       fn_name = j["name"].lower() 
       signature = '{}({})'.format(j['name'],','.join([input['type'] for input in j['inputs']]))
+      #print(j['name'],','.join([input['type'] for input in j['inputs']]))
       # Functions signature use the 4 first bytes of the sha3 then 0
       j["signature"] = w3.sha3(text=signature)[0:4].hex() + '00000000000000000000000000000000000000000000000000000000'
+      #print('signature is:', j['signature'])
+
       # print(f"{j['name']}   {signature}   {j['signature']}")
       # If the name already exists, we add an index starting by 0 at the end of the function
       if fn_name in dict_fn:

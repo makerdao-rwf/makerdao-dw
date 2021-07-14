@@ -74,8 +74,11 @@ def get_function_data(t):
       try:
         #print(t['transactionHash'])
         input_data = '0x' + t['data'][x:]
+        #print("this is methodid", input_data[:10])
         inputs = contract.decode_function_input(input_data)
         params = inputs[1].values()
+
+        methodid = input_data[:10] + '00000000000000000000000000000000000000000000000000000000'
         #print(inputs)
         
       except ValueError:    
@@ -90,7 +93,7 @@ def get_function_data(t):
 
         pass
       
-  return inputs, params
+  return inputs, params, methodid
   
 
 def create_schema (abi):
@@ -128,7 +131,7 @@ def create_schema (abi):
 # Return transaction logs or filter the specific type of log you need to return.
 def read_logs(address, fromBlock, toBlock):   
 
-  # If we're finding events from DSSProxyActions (x82ecd135dce65fbc6dbdd0e4237e0af93ffd5038)
+  # If proxy_actions, only find event/function logs that are sent to DSSProxyActions (0x82ecd135dce65fbc6dbdd0e4237e0af93ffd5038)
   if contract_name == 'proxy_actions':
     t = []
     for logs in w3.eth.get_logs({'fromBlock': fromBlock, 'toBlock': lastBlock, 'address': address}):
@@ -183,12 +186,14 @@ while fromBlock < lastBlock:
     for address in addresses:
       
       # TODO: manage too many results errors and manage the number of blocks automatically
-      for t in w3.eth.get_logs({'fromBlock': fromBlock, 'toBlock': toBlock, 'address': address}):
-      #for t in read_logs(address, fromBlock, toBlock): 
+      #for t in w3.eth.get_logs({'fromBlock': fromBlock, 'toBlock': toBlock, 'address': address}):
+      for t in read_logs(address, fromBlock, toBlock): 
+        #print("original log: ", t)
 
-        # Check if there is an event in the existing contract's ABI for this log
+        # Construct j based on the topic found in t (methodid)
         try:
           j = dict_sign[t.topics[0].hex()]
+
         # If there isn't, this may be a proxy contract. Check to see if we have a proxy contract/abi. If not, get it.
         except KeyError:
           #print('Topic was not found in the ABI. It will probably find it in the input data.')
@@ -200,14 +205,22 @@ while fromBlock < lastBlock:
         #Decode the input data
         if j["type"] == "function" and j["stateMutability"] != "view":
           try:
-            inputs, params = get_function_data(t) 
-            print("inputs:", inputs, "\n params:", params)
+            inputs, params, methodid = get_function_data(t) 
+            #print("inputs:", inputs, "\n params:", params)
           except:
             print("Could not parse input data")
             pass #raise #Should we raise an error here?
+         
+          # MAYBE DO THIS FOR ALL CONTRACTS AND REMOVE THE WAY THAT J IS FOUND ABOVE
+          if contract_name == 'proxy_actions':
+            j = dict_sign[methodid] # Get rid of the old method of finding j
+            table_name = j["table"]
+            #print('this is j:', j, 'this is methodid:', methodid)
+            
 
           # Encode functions for SQL
           try:
+            
             for idx, value in enumerate(params):
               #if IndexError, list index out of range, then it's bc/ one of your params has an additional value in it ... figure out how these should be handled
               if j["inputs"][idx]["type"] == "address": # Addresses are given as string but converted to binary array for space considerations
@@ -253,9 +266,6 @@ while fromBlock < lastBlock:
 
         session.execute(text(sql_insert)) # Uncomment when you want to submit or post to the database
 
-        #if w3.eth.get_logs({'fromBlock': fromBlock, 'toBlock': toBlock, 'address': address}) == []:
-          #raise ValueError("Nothing returned from Infura.")
-
       # Manage the blockstep automatically
       if cnt == 0: #If there are 0 insertions in a blockstep, increase the block step
         blocksStep += 10
@@ -264,7 +274,7 @@ while fromBlock < lastBlock:
       cnt += 1    
 
   fromBlock = toBlock + 1 
-  # print(f"Inserted {cnt} lines into {schema}.{table_name}") # Sometimes there are no insertions when this is printed.
+  print(f"Inserted {cnt} lines into {schema}.{table_name}") # Sometimes there are no insertions when this is printed.
 
 
 #NOTES
