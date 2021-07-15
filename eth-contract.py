@@ -72,27 +72,23 @@ def get_function_data(t):
   else:
     while inputs is None:
       try:
-        #print(t['transactionHash'])
         input_data = '0x' + t['data'][x:]
-        #print("this is methodid", input_data[:10])
         inputs = contract.decode_function_input(input_data)
         params = inputs[1].values()
 
-        methodid = input_data[:10] + '00000000000000000000000000000000000000000000000000000000'
         #print(inputs)
         
       except ValueError:    
-        x = x + 8 #or x+=32 or x+=8. NOTE: This removes leading topics (0s) from the input data. Works well in multiples of 8 or 16.
+        x += 8 #or x+=32 or x+=8. NOTE: This removes leading topics (0s) from the input data. Works well in multiples of 8 or 16.
         
         if input_data == '0x': #If the string is never able to be read 'decode_function_input' (and it just truncates to 0x)
           print('Cannot read input data. The input data or ABI may be invalid.', t['data'])
           x=2
-          # Do I need to raise an error here?
-          #inputs = []
-          #params = []
+          raise ValueError # Do I need to raise an error here?
 
         pass
-      
+
+  methodid = input_data[:10] + '00000000000000000000000000000000000000000000000000000000'
   return inputs, params, methodid
   
 
@@ -132,14 +128,16 @@ def create_schema (abi):
 def read_logs(address, fromBlock, toBlock):   
 
   # If proxy_actions, only find event/function logs that are sent to DSSProxyActions (0x82ecd135dce65fbc6dbdd0e4237e0af93ffd5038)
+  # These can also be found as '0 value internal transactions' on Etherscan, but there is no API calls for it at the moment
   if contract_name == 'proxy_actions':
     t = []
+
     for logs in w3.eth.get_logs({'fromBlock': fromBlock, 'toBlock': lastBlock, 'address': address}):
-      try:  
-        if '82ecd135dce65fbc6dbdd0e4237e0af93ffd5038' in logs.topics[2].hex():
-          t.append(logs)
-      except:
-        pass
+      receipt = w3.eth.getTransactionReceipt(logs.transactionHash)['logs'][0]#[0]['data']
+      if '82ecd135dce65fbc6dbdd0e4237e0af93ffd5038' in receipt.data:
+        #print(receipt.data)
+        t.append(receipt)
+
     return t
       
   #If we're not finding events from proxy_actions, just read logs normally
@@ -157,6 +155,7 @@ contract = w3.eth.contract(address=addresses[0], abi=abi) # Get contracts
 j, dict_evt, dict_fn, dict_sign = get_abi_params(abi, contract_name, w3) # Get ABI parameters (function names, event names, etc.) 
 create_schema(abi) # Create SQL Schema if it doesn't already exist
 
+
 # Start Reading transactions
 print(f"Start from block {fromBlock}")
 lastBlock = w3.eth.block_number
@@ -166,7 +165,6 @@ with engine.connect() as sql:
   for j in abi:
     if (j["type"] == "function" and j["stateMutability"] != "view") or (j["type"] == "event" and j["anonymous"] != True):
       table_name = j['table']
-      #print('this is the table name', table_name)
       sql_check_table_exists = f"""select max(block_number) from {schema}."{table_name}" """
       max_block = sql.execute(text(sql_check_table_exists)).scalar()
       if max_block != None and max_block > fromBlock:
@@ -186,21 +184,15 @@ while fromBlock < lastBlock:
     for address in addresses:
       
       # TODO: manage too many results errors and manage the number of blocks automatically
-      #for t in w3.eth.get_logs({'fromBlock': fromBlock, 'toBlock': toBlock, 'address': address}):
       for t in read_logs(address, fromBlock, toBlock): 
-        #print("original log: ", t)
 
         # Construct j based on the topic found in t (methodid)
         try:
           j = dict_sign[t.topics[0].hex()]
-
-        # If there isn't, this may be a proxy contract. Check to see if we have a proxy contract/abi. If not, get it.
+          table_name = j["table"] 
+          values = ""
         except KeyError:
-          #print('Topic was not found in the ABI. It will probably find it in the input data.')
           pass
-
-        table_name = j["table"] 
-        values = ""
 
         #Decode the input data
         if j["type"] == "function" and j["stateMutability"] != "view":
@@ -209,18 +201,16 @@ while fromBlock < lastBlock:
             #print("inputs:", inputs, "\n params:", params)
           except:
             print("Could not parse input data")
-            pass #raise #Should we raise an error here?
+            raise ValueError("Your input data is probably not readable") #pass #Should we pass here instead
          
           # MAYBE DO THIS FOR ALL CONTRACTS AND REMOVE THE WAY THAT J IS FOUND ABOVE
           if contract_name == 'proxy_actions':
-            j = dict_sign[methodid] # Get rid of the old method of finding j
+            j = dict_sign[methodid]
             table_name = j["table"]
-            #print('this is j:', j, 'this is methodid:', methodid)
-            
+            values = ""
 
           # Encode functions for SQL
-          try:
-            
+          try:    
             for idx, value in enumerate(params):
               #if IndexError, list index out of range, then it's bc/ one of your params has an additional value in it ... figure out how these should be handled
               if j["inputs"][idx]["type"] == "address": # Addresses are given as string but converted to binary array for space considerations
@@ -229,17 +219,12 @@ while fromBlock < lastBlock:
                 values += ", '" + str(value) +"'"
               elif isinstance(value, bytes):
                 values += ", '\\x" + value.hex() + "'"
-              #elif isinstance(value, int): #This breaks makermcd.vat. Delete it.
-              #  values += ", '\\" + value[1:] + "'"
               else:
                 values += ", " + str(value)
           except:
             print('Could not encode parameters', params)
             print('type1', type(params[0]), 'type2', type(params[1]), 'type3', type(params[2]))
             continue #If it can't encode it, is it okay to write it as it is?
-          
-        #if j["type"] == "function" and j["stateMutability"] == "view":
-        #  print("this isnt reading certain mutable functions?")
 
         # Encode events for SQL  
         elif j["type"] == "event" and j["anonymous"] != True:
