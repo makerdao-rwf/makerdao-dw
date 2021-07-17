@@ -18,6 +18,7 @@ import argparse
 import warnings
 import requests
 import time
+import snowflake.connector as sf
 
 from functions import get_abi, get_abi_params
 
@@ -51,13 +52,15 @@ db_user = conf["db.user"]
 db_password = conf["db.password"]
 db_db = conf["db.database"]
 addresses = conf["contracts"][schema][contract_name]["addresses"]
+snowflake_user = conf["snowflake.user"]
+snowflake_pwd = conf["snowflake.password"]
+snowflake_account = conf["snowflake.account"]
+
 print(addresses)
   
 # Connect to PostgreSQL
 engine = create_engine('postgresql://'+db_user+':'+db_password+'@'+db_host+':5432/'+db_db) 
 
-# Set w3 source to Infura Mainnet and init contract
-w3 = Web3(Web3.HTTPProvider('https://mainnet.infura.io/v3/' + infura_key)) 
 
 # Convert each event's input data to a readable format. Then decode it.
 def get_function_data(t):
@@ -79,7 +82,7 @@ def get_function_data(t):
         #print(inputs)
         
       except ValueError:    
-        x += 8 #or x+=32 or x+=8. NOTE: This removes leading topics (0s) from the input data. Works well in multiples of 8 or 16.
+        x += 8 #or x+=32. NOTE: This removes leading topics (0s) from the input data. Works well in multiples of 8 or 16.
         
         if input_data == '0x': #If the string is never able to be read 'decode_function_input' (and it just truncates to 0x)
           print('Cannot read input data. The input data or ABI may be invalid.', t['data'])
@@ -128,15 +131,14 @@ def create_schema (abi):
 def read_logs(address, fromBlock, toBlock):   
 
   # If proxy_actions, only find event/function logs that are sent to DSSProxyActions (0x82ecd135dce65fbc6dbdd0e4237e0af93ffd5038)
-  # These can also be found as '0 value internal transactions' on Etherscan, but there is no API calls for it at the moment
+  # These can also be found as '0 value internal transactions' on Etherscan, but there is no API calls for it at the moment. Is there a faster way?
   if contract_name == 'proxy_actions':
     t = []
-
     for logs in w3.eth.get_logs({'fromBlock': fromBlock, 'toBlock': lastBlock, 'address': address}):
-      receipt = w3.eth.getTransactionReceipt(logs.transactionHash)['logs'][0]#[0]['data']
+      receipt = w3.eth.getTransactionReceipt(logs.transactionHash)['logs'][0]#['data']
       if '82ecd135dce65fbc6dbdd0e4237e0af93ffd5038' in receipt.data:
-        #print(receipt.data)
-        t.append(receipt)
+        t.append(receipt) #Can you make this faster? It seems pretty slow...
+        print(len(t))
 
     return t
       
@@ -146,9 +148,13 @@ def read_logs(address, fromBlock, toBlock):
     return t
 
 
+
+# Set w3 source to Infura Mainnet and init contract
+w3 = Web3(Web3.HTTPProvider('https://mainnet.infura.io/v3/' + infura_key)) 
+
 # Get addresses, contract names, and ABI parameters
 for address in addresses: # This only gets the last address. Get all. I think you have to put this under 'for address in addresses' below. ***
-  address, abi, contract_name = get_abi(address, schema, contract_name)
+  address, abi = get_abi(address, schema, contract_name)
 
 addresses = [w3.toChecksumAddress(a) for a in addresses] # Get addresses
 contract = w3.eth.contract(address=addresses[0], abi=abi) # Get contracts
@@ -169,6 +175,7 @@ with engine.connect() as sql:
       max_block = sql.execute(text(sql_check_table_exists)).scalar()
       if max_block != None and max_block > fromBlock:
         fromBlock = max_block + 1
+
 
 # Fetch event data from each block
 while fromBlock < lastBlock:
@@ -201,9 +208,9 @@ while fromBlock < lastBlock:
             #print("inputs:", inputs, "\n params:", params)
           except:
             print("Could not parse input data")
-            raise ValueError("Your input data is probably not readable") #pass #Should we pass here instead
+            raise ValueError("Your input data is probably not readable") #Should we pass here instead?
          
-          # MAYBE DO THIS FOR ALL CONTRACTS AND REMOVE THE WAY THAT J IS FOUND ABOVE
+          # Replace j if the input data contains the signature/methodid instead of topic 0 ('execute' transactions).
           if contract_name == 'proxy_actions':
             j = dict_sign[methodid]
             table_name = j["table"]
@@ -251,9 +258,24 @@ while fromBlock < lastBlock:
 
         session.execute(text(sql_insert)) # Uncomment when you want to submit or post to the database
 
+
+        # SNOWFLAKE
+        conn = sf.connect(
+        user= snowflake_user, #userid
+        password= snowflake_pwd, #password
+        account= snowflake_account, #organization_name.account_name
+        warehouse = "maker_warehouse", 
+        database = "" # Use a variable here
+        )
+
+        # Creating Tables and Inserting Data
+        conn.cursor().execute("CREATE OR REPLACE TABLE test_table(col1 integer, col2 string)")
+        conn.cursor().execute("INSERT INTO test_table(col1, col2) VALUES (%s, %s)", ('123', 'indian Cricket'))
+
+
       # Manage the blockstep automatically
       if cnt == 0: #If there are 0 insertions in a blockstep, increase the block step
-        blocksStep += 10
+        blocksStep = blocksStep*1.2
       if cnt > 30: # If there are > 30 insertions in one blockstep, decrease the blockstep.
         blocksStep = blocksStep/2
       cnt += 1    
@@ -263,8 +285,9 @@ while fromBlock < lastBlock:
 
 
 #NOTES
-# 2. double check flashloan_call (mutable ?)
-# 3. 
+# 1. double check flashloan_call (mutable ?)
+# 2. ethereum.transactions
+# 3. handle the 'too many transactions' error
 
 
 '''   
@@ -288,21 +311,4 @@ if addresses == []:
   print('fromblock', fromBlock)
   toBlock = fromBlock + 1
   # Sample response: AttributeDict({'address': '0x875773784Af8135eA0ef43b5a374AaD105c5D39e', 'blockHash': HexBytes('0x500e9107ee7757e683b8420f94897dcbee789761fe0949f5f9374c262afc8725'), 'blockNumber': 12801059, 'data': '0x00000000000000000000000000000000000000000000002a9bf0f397f1080000', 'logIndex': 0, 'removed': False, 'topics': [HexBytes('0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'), HexBytes('0x000000000000000000000000031f71b5369c251a6544c41ce059e6b3d61e42c6'), HexBytes('0x000000000000000000000000275da8e61ea8e02d51edd8d0dc5c0e62b4cdb0be')], 'transactionHash': HexBytes('0x558a88ca3fe10e02de0730844f6ae55708f0b498b9527257783be0986d17d995'), 'transactionIndex': 0})
-'''
-'''
-# Store addresses, ABIs, and contract names
-address_list, abi_list, contract_name_list, contract_list = [],[],[],[]
-
-# Get addresses, contract names, and ABI parameters. # test on makermcd.join
-for address in addresses: # This only gets the last address. Get all. I think you have to put this under 'for address in addresses' below. ***
-  address, abi, contract_name = get_abi(address, schema, contract_name)
-  address = w3.toChecksumAddress(address)
-  address_list.append(address)
-  abi_list.append(abi)
-  contract_name_list.append(contract_name)
-  #contract_list.append(w3.eth.contract(address = address, abi = abi))
-  j, dict_evt, dict_fn, dict_sign = get_abi_params(abi, contract_name, w3) # Get ABI parameters (function names, event names, etc.) 
-  create_schema(abi) # Create SQL Schema (if it doesn't already exist)
-contract = w3.eth.contract(address = address, abi = abi)
-print('addresses', address_list, 'names', contract_name_list)
 '''

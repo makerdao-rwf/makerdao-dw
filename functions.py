@@ -1,6 +1,7 @@
 import json
 import requests
 import time
+import snowflake.connector as sf
 import eth_event
 
 
@@ -15,13 +16,16 @@ def get_abi(address, schema, contract_name):
       response = 'https://api.etherscan.io/api?module=contract&action=getsourcecode&address=' + address + '&apikey=M36N6D99NY4U4E1GEIYYFYIERRR1MF5S8F'
       abi = json.loads(requests.get(response).json()['result'][0]['ABI'])
       #contract_name = json.loads(requests.get(response).text)['result'][0]['ContractName'] # Get new contract name
-      print("Retrieved the implementation ABI and contract name. ", contract_name)
+      print("Retrieved the ABI")
+
+  return address, abi
+'''
+# This code will retrieve the proxy address, but it's slow right now and possibly not necessary.
 
   # Check if it's either a proxy address or implementation address.
   response = 'https://api.etherscan.io/api?module=contract&action=getsourcecode&address=' + address + '&apikey=M36N6D99NY4U4E1GEIYYFYIERRR1MF5S8F'
-  #print(response)
   source_code = requests.get(response).json()['result'][0]['SourceCode']
-  #print(source_code)
+
   if 'IMPLEMENTATION_SLOT =' in source_code: 
     print("This is a proxy/implementation contract")
     try: # If so, grab and replace the ABI, address, and contract name
@@ -50,13 +54,12 @@ def get_abi(address, schema, contract_name):
   
   else:
     print("This is not an implementation/proxy contract")
-
-  return address, abi, contract_name
+  
+  return address, abi
+  '''
 # Feature? Permanently save the proxy contract and address combination to SQL. Read from there first before doing the above function.
 
 
-
-#From the ABI, get function and event names j['name']
 
 # add tablename to abi json 
 dict_fn = {} ## Manage an index for disambuguation of functions with same names but different signature
@@ -71,7 +74,6 @@ def get_abi_params(abi, contract_name, w3):
       #print(j['name'],','.join([input['type'] for input in j['inputs']]))
       # Functions signature use the 4 first bytes of the sha3 then 0
       j["signature"] = w3.sha3(text=signature)[0:4].hex() + '00000000000000000000000000000000000000000000000000000000'
-      #print('signature is:', j['signature'])
 
       # print(f"{j['name']}   {signature}   {j['signature']}")
       # If the name already exists, we add an index starting by 0 at the end of the function
@@ -95,3 +97,37 @@ def get_abi_params(abi, contract_name, w3):
       dict_sign[j["signature"]] = j
   return j, dict_evt, dict_fn, dict_sign
 
+
+'''
+def to_snowflake(): #Give new names
+
+  # Connect to Snowflake
+
+  conn = sf.connect(
+  user= snowflake_user, #userid
+  password="1Helse123", #password
+  account="KL63833.west-us-2.azure", #organization_name.account_name
+  )
+
+  # Creating a Database, Schema, and Warehouse
+  # conn.cursor().execute("CREATE WAREHOUSE IF NOT EXISTS maker_warehouse_mg")
+  # conn.cursor().execute("CREATE DATABASE IF NOT EXISTS testdb_mg")
+  # conn.cursor().execute("CREATE SCHEMA IF NOT EXISTS testschema_mg")
+
+  # Set the Database, Schema, and Warehouse
+  conn.cursor().execute("USE DATABASE testdb_mg")
+  conn.cursor().execute("USE WAREHOUSE maker_warehouse")
+  conn.cursor().execute("USE DATABASE testdb_mg")
+  conn.cursor().execute("USE SCHEMA testdb_mg.testschema_mg") 
+
+  # Creating Tables and Inserting Data
+  conn.cursor().execute(
+  "CREATE OR REPLACE TABLE "
+  "test_table(col1 integer, col2 string)" 
+  )
+
+  # Insert
+  conn.cursor().execute("INSERT INTO test_table(col1, col2) VALUES (%s, %s)", ('123', 'indian Cricket'))
+
+  return 
+'''
