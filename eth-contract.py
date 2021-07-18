@@ -55,6 +55,7 @@ addresses = conf["contracts"][schema][contract_name]["addresses"]
 snowflake_user = conf["snowflake.user"]
 snowflake_pwd = conf["snowflake.password"]
 snowflake_account = conf["snowflake.account"]
+snowflake_wh = conf["snowflake.warehouse"]
 
 print(addresses)
   
@@ -128,6 +129,9 @@ def create_schema (abi):
           sql.execute(text(sql_create_table))
 
 
+'''
+Are the column types below the most efficient ?
+'''
 def create_schema_snowflake (abi):
   # create all tables if needed
   common_columns = "block_number bigint, block_hash varchar, address varchar, log_index int, transaction_index int, transaction_hash varchar"
@@ -194,7 +198,7 @@ conn = sf.connect(
 user= snowflake_user, #userid
 password= snowflake_pwd, #password
 account= snowflake_account, #organization_name.account_name
-warehouse = "maker_warehouse" #create and use this warehouse
+warehouse =  snowflake_wh # You first need to create a warehouse and save the name in template.conf
 )
 
 conn.cursor().execute(f"CREATE DATABASE IF NOT EXISTS makerdw_dev")
@@ -301,7 +305,6 @@ while fromBlock < lastBlock:
         #session.execute(text(sql_insert)) # Uncomment when you want to submit or post to the database
 
         # SNOWFLAKE
-        # Insert values
         conn.cursor().execute(f"INSERT INTO {table_name} VALUES ({values})")
         print(f"INSERT INTO {table_name} VALUES ({values})")
   
@@ -317,9 +320,10 @@ while fromBlock < lastBlock:
 
 
 #NOTES
-# 1. double check flashloan_call (mutable ?)
-# 2. ethereum.transactions
-# 3. handle the 'too many transactions' error
+# 1. Is proxy_actions too slow? If so, how can we speed this up?
+# 2. double check flashloan_call (mutable ?)
+# 3. ethereum.transactions
+# 4. handle the 'too many transactions' error
 
 
 '''   
