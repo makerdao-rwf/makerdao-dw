@@ -119,12 +119,40 @@ def create_schema (abi):
               unnamed_col_idx += 1
             try:
               columns += ', "'+col_name+'"' + " " + type_mapping[i["type"]] #map the type from the ABI to the sql type in the 'type_mapping' dict
+              print("sql columns:", columns)
             except KeyError:
               print("There is probably an unsupported datatype You can add more to the type_mapping dict above")
               raise
           sql_create_table = f"""create table {schema}."{table_name}" ( {columns} )"""
           print(sql_create_table)
           sql.execute(text(sql_create_table))
+
+
+def create_schema_snowflake (abi):
+  # create all tables if needed
+  common_columns = "block_number bigint, block_hash varchar, address varchar, log_index int, transaction_index int, transaction_hash varchar"
+  type_mapping = {"address": "varchar", "bytes": "varchar", "bytes4": "varchar", "bytes32": "varchar", "int256": "numeric", "uint256": "numeric", "uint16":"numeric", "bool": "boolean", "address[]":"varchar", "uint256[]":"numeric", "uint8":"numeric", "string":"varchar"}
+
+  for j in abi:
+      # Collect functions and events from the ABI
+      if (j["type"] == "function" and j["stateMutability"] != "view") or (j["type"] == "event" and j["anonymous"] != True):
+        table_name = j['table']
+        columns = common_columns
+        unnamed_col_idx = 0
+        for i in j["inputs"]:
+          col_name = i["name"].lower()
+          if col_name == "":
+            col_name = f"v{unnamed_col_idx}"
+            unnamed_col_idx += 1
+          try:
+            columns += ', "'+col_name+'"' + " " + type_mapping[i["type"]] #map the type from the ABI to the sql type in the 'type_mapping' dict
+          except KeyError:
+            print("There is probably an unsupported datatype You can add more to the type_mapping dict above")
+            raise
+
+        # Create or replace table
+        conn.cursor().execute(f"CREATE OR REPLACE TABLE {table_name}({columns})") #columns format: (col1 integer, col2 string, ...)
+
 
 
 # Return transaction logs or filter the specific type of log you need to return.
@@ -138,7 +166,7 @@ def read_logs(address, fromBlock, toBlock):
       receipt = w3.eth.getTransactionReceipt(logs.transactionHash)['logs'][0]#['data']
       if '82ecd135dce65fbc6dbdd0e4237e0af93ffd5038' in receipt.data:
         t.append(receipt) #Can you make this faster? It seems pretty slow...
-        print(len(t))
+        print("Retrieving logs before inserting. This may take a minute.", len(t))
 
     return t
       
@@ -146,7 +174,6 @@ def read_logs(address, fromBlock, toBlock):
   else:
     t = w3.eth.get_logs({'fromBlock': fromBlock, 'toBlock': toBlock, 'address': address})
     return t
-
 
 
 # Set w3 source to Infura Mainnet and init contract
@@ -160,6 +187,22 @@ addresses = [w3.toChecksumAddress(a) for a in addresses] # Get addresses
 contract = w3.eth.contract(address=addresses[0], abi=abi) # Get contracts
 j, dict_evt, dict_fn, dict_sign = get_abi_params(abi, contract_name, w3) # Get ABI parameters (function names, event names, etc.) 
 create_schema(abi) # Create SQL Schema if it doesn't already exist
+
+
+# Snowflake
+conn = sf.connect(
+user= snowflake_user, #userid
+password= snowflake_pwd, #password
+account= snowflake_account, #organization_name.account_name
+warehouse = "maker_warehouse" #create and use this warehouse
+)
+
+conn.cursor().execute(f"CREATE DATABASE IF NOT EXISTS makerdw_dev")
+conn.cursor().execute(f"USE DATABASE makerdw_dev") 
+conn.cursor().execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+conn.cursor().execute(f"USE SCHEMA {schema}")
+
+create_schema_snowflake(abi)
 
 
 # Start Reading transactions
@@ -179,7 +222,7 @@ with engine.connect() as sql:
 
 # Fetch event data from each block
 while fromBlock < lastBlock:
-  toBlock = fromBlock + blocksStep
+  toBlock = fromBlock + int(blocksStep)
   if(toBlock > lastBlock):
     toBlock = lastBlock
   print(f"Fetching events from block {fromBlock} to {toBlock}")
@@ -253,26 +296,15 @@ while fromBlock < lastBlock:
         # block_number bigint, block_hash bytea, address text, log_index int, transaction_index int, transaction_hash bytea"
         ## Preprend the common columns
         values = f"{t.blockNumber}, '\\{t.blockHash.hex()[1:]}', '\\{t.address[1:]}', {t.logIndex}, {t.transactionIndex}, '\\{t.transactionHash.hex()[1:]}' {values}"
-        sql_insert = f"""insert into {schema}."{table_name}" values ({values})"""
-        print(text(sql_insert))
-
-        session.execute(text(sql_insert)) # Uncomment when you want to submit or post to the database
-
+        #sql_insert = f"""insert into {schema}."{table_name}" values ({values})"""
+        #print(text(sql_insert))
+        #session.execute(text(sql_insert)) # Uncomment when you want to submit or post to the database
 
         # SNOWFLAKE
-        conn = sf.connect(
-        user= snowflake_user, #userid
-        password= snowflake_pwd, #password
-        account= snowflake_account, #organization_name.account_name
-        warehouse = "maker_warehouse", 
-        database = "" # Use a variable here
-        )
-
-        # Creating Tables and Inserting Data
-        conn.cursor().execute("CREATE OR REPLACE TABLE test_table(col1 integer, col2 string)")
-        conn.cursor().execute("INSERT INTO test_table(col1, col2) VALUES (%s, %s)", ('123', 'indian Cricket'))
-
-
+        # Insert values
+        conn.cursor().execute(f"INSERT INTO {table_name} VALUES ({values})")
+        print(f"INSERT INTO {table_name} VALUES ({values})")
+  
       # Manage the blockstep automatically
       if cnt == 0: #If there are 0 insertions in a blockstep, increase the block step
         blocksStep = blocksStep*1.2

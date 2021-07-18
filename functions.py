@@ -115,7 +115,6 @@ def to_snowflake(): #Give new names
   # conn.cursor().execute("CREATE SCHEMA IF NOT EXISTS testschema_mg")
 
   # Set the Database, Schema, and Warehouse
-  conn.cursor().execute("USE DATABASE testdb_mg")
   conn.cursor().execute("USE WAREHOUSE maker_warehouse")
   conn.cursor().execute("USE DATABASE testdb_mg")
   conn.cursor().execute("USE SCHEMA testdb_mg.testschema_mg") 
