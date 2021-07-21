@@ -51,7 +51,6 @@ w3 = Web3(Web3.HTTPProvider('https://mainnet.infura.io/v3/' + infura_key))
 
 # create all tables if needed
 columns = "block_number bigint, block_hash bytea, miner bytea, nonce bytea, gas_limit bigint, gas_used bigint, difficulty bigint, extra_data bytea, time timestamp, size bigint"
-
 type_mapping = {"address": "bytea", "bytes": "bytea", "bytes4": "bytea", "bytes32": "bytea", "int256": "numeric", "uint256": "numeric"}
 
 with engine.connect() as sql:

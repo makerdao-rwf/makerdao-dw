@@ -3,6 +3,7 @@ import requests
 import time
 import snowflake.connector as sf
 import eth_event
+import os
 
 
 def get_abi(address, schema, contract_name):
@@ -15,8 +16,12 @@ def get_abi(address, schema, contract_name):
   except: 
       response = 'https://api.etherscan.io/api?module=contract&action=getsourcecode&address=' + address + '&apikey=M36N6D99NY4U4E1GEIYYFYIERRR1MF5S8F'
       abi = json.loads(requests.get(response).json()['result'][0]['ABI'])
-      #contract_name = json.loads(requests.get(response).text)['result'][0]['ContractName'] # Get new contract name
-      print("Retrieved the ABI")
+
+      abi_file = open(f"conf/{schema}/{contract_name}.abi",'w')
+      abi_file.write(str(abi))
+      abi_file.close()
+
+      print("Retrieved and saved the ABI")
 
   return address, abi
 '''
