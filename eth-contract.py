@@ -66,16 +66,10 @@ class snowflake_engine:
   def encode_functions(self, params, values):
     '''Encode function parameters for Snowflake'''   
     for idx, value in enumerate(params):
-      values += ", " + "'" + str(value)+ "'"
-      '''
-      if j["inputs"][idx]["type"] == "address": # Addresses are given as string but converted to binary array for space considerations
-        values += ", '\\" + value[1:] + "'"
-      elif isinstance(value, str): # returns true if value is a string
-        values += ", '" + str(value) +"'"
-      elif isinstance(value, bytes):
-        values += ", '\\x" + value.hex() + "'"
+      if isinstance(value, bytes):
+        values += ", '" + value.hex() + "'"
       else:
-        values += ", " + str(value)'''
+        values += ", " + "'" + str(value)+ "'"
     
     return values
 
@@ -84,7 +78,10 @@ class snowflake_engine:
     '''Encode event parameters for Snowflake'''
     for idx, event_param in enumerate(event_data["data"]):
       value = event_param["value"]
-      values += ", " + "'" + str(value)+ "'"
+      if isinstance(value, bytes):
+        values += ", '" + value.hex() + "'"
+      else:
+        values += ", " + "'" + str(value)+ "'"
 
     return values
 
@@ -221,19 +218,22 @@ def get_function_data(t):
   return inputs, params, methodid
   
 
-# Return transaction logs or filter the specific type of log you need to return.
+# Return transaction logs or filter the specific type of log you need to return. NOTE: VERIFY THAT THIS IS NOT RETURNING DUPLICATES AND THAT IT'S NOT REMOVING ANYTHING THAT SHOULD BE KEPT
 def read_logs(address, fromBlock, toBlock):   
 
   # If proxy_actions, only find event/function logs that are sent to DSSProxyActions (0x82ecd135dce65fbc6dbdd0e4237e0af93ffd5038)
   # These can also be found as '0 value internal transactions' on Etherscan, but there is no API calls for it at the moment. Is there a faster way?
   if contract_name == 'proxy_actions':
-    t = []
-    for logs in w3.eth.get_logs({'fromBlock': fromBlock, 'toBlock': toBlock, 'address': address}):
-      receipt = w3.eth.getTransactionReceipt(logs.transactionHash)['logs'][0]#['data'] #This takes a long time
-      if '82ecd135dce65fbc6dbdd0e4237e0af93ffd5038' in receipt.data:
-        t.append(receipt) #Can you make this faster? It seems pretty slow...
-        print("Retrieving log ", len(t))
+    t,duplicates = [],[]
 
+    for log in w3.eth.get_logs({'fromBlock': fromBlock, 'toBlock': toBlock, 'address': address}):
+      if log.transactionHash.hex() not in duplicates: #remove duplicate transactions
+        duplicates.append(log.transactionHash.hex())
+        receipt = w3.eth.getTransactionReceipt(log.transactionHash)['logs'][0]#['data'] 
+        if '82ecd135dce65fbc6dbdd0e4237e0af93ffd5038' in receipt.data: 
+          t.append(receipt) #Can you make this faster?
+          print("Retrieving log ", len(t))
+    
     return t
       
   #If we're not finding events from proxy_actions, just read logs normally
