@@ -24,6 +24,7 @@ def get_abi(address, schema, contract_name):
       print("Retrieved and saved the ABI")
 
   return address, abi
+  
 '''
 # This code will retrieve the proxy address, but it's slow right now and possibly not necessary.
 
@@ -103,35 +104,37 @@ def get_abi_params(abi, contract_name, w3):
   return j, dict_evt, dict_fn, dict_sign
 
 
-'''
-def to_snowflake(): #Give new names
 
-  # Connect to Snowflake
+def get_function_data(t, contract):
+  '''Convert each event's input data to a readable format. Then decode it.'''
+  x=2
+  inputs = None
 
-  conn = sf.connect(
-  user= snowflake_user, #userid
-  password="1Helse123", #password
-  account="KL63833.west-us-2.azure", #organization_name.account_name
-  )
+  if t['data'] == '0x':
+    print("The input data coming from Infura is empty.")
+    inputs = []
+    params =[]
 
-  # Creating a Database, Schema, and Warehouse
-  # conn.cursor().execute("CREATE WAREHOUSE IF NOT EXISTS maker_warehouse_mg")
-  # conn.cursor().execute("CREATE DATABASE IF NOT EXISTS testdb_mg")
-  # conn.cursor().execute("CREATE SCHEMA IF NOT EXISTS testschema_mg")
+  else:
+    while inputs is None:
+      try:
+        input_data = '0x' + t['data'][x:]
+        inputs = contract.decode_function_input(input_data)
+        params = inputs[1].values()
 
-  # Set the Database, Schema, and Warehouse
-  conn.cursor().execute("USE WAREHOUSE maker_warehouse")
-  conn.cursor().execute("USE DATABASE testdb_mg")
-  conn.cursor().execute("USE SCHEMA testdb_mg.testschema_mg") 
+        #print(inputs)
+        
+      except ValueError:    
+        x += 8 #or x+=32. NOTE: This removes leading topics (0s) from the input data. Works well in multiples of 8 or 16.
+        
+        if input_data == '0x': #If the string is never able to be read 'decode_function_input' (and it just truncates to 0x)
+          print('Cannot read input data. The input data or ABI may be invalid.', t['data'])
+          x=2
+          raise ValueError # Do I need to raise an error here?
 
-  # Creating Tables and Inserting Data
-  conn.cursor().execute(
-  "CREATE OR REPLACE TABLE "
-  "test_table(col1 integer, col2 string)" 
-  )
+        pass
 
-  # Insert
-  conn.cursor().execute("INSERT INTO test_table(col1, col2) VALUES (%s, %s)", ('123', 'indian Cricket'))
+  methodid = input_data[:10] + '00000000000000000000000000000000000000000000000000000000'
+  return inputs, params, methodid
 
-  return 
-'''
+  

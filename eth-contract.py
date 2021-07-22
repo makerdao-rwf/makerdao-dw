@@ -21,7 +21,7 @@ import time
 from sqlalchemy.dialects import registry
 registry.register('snowflake', 'snowflake.sqlalchemy', 'dialect')
 
-from functions import get_abi, get_abi_params
+from functions import get_abi, get_abi_params, get_function_data
 
 
 # Allow user to input contract in terminal command
@@ -62,7 +62,6 @@ class snowflake_engine:
   def __init__ (self):
      pass
 
-  # THIS NEEDS TO BE FIXED
   def encode_functions(self, params, values):
     '''Encode function parameters for Snowflake'''   
     for idx, value in enumerate(params):
@@ -70,10 +69,9 @@ class snowflake_engine:
         values += ", '" + value.hex() + "'"
       else:
         values += ", " + "'" + str(value)+ "'"
-    
+
     return values
 
-  # THIS NEEDS TO BE FIXED
   def encode_events(self, event_data, values):
     '''Encode event parameters for Snowflake'''
     for idx, event_param in enumerate(event_data["data"]):
@@ -179,50 +177,16 @@ class sqlabstract(snowflake_engine, postgresql_engine): #Change this to change w
               except KeyError:
                 print("There is probably an unsupported datatype You can add more to the type_mapping dict above")
                 raise
-            sql_create_table = f"""create table if not exists {schema}."{table_name}" ( {columns} )""" #THIS USED TO NOT HAVE 'if not exists'
+            sql_create_table = f"""create table if not exists {schema}."{table_name}" ( {columns} )""" 
             print(sql_create_table)
             sql.execute(text(sql_create_table))
 
-
-
-# Convert each event's input data to a readable format. Then decode it.
-def get_function_data(t):
-  x=2
-  inputs = None
-
-  if t['data'] == '0x':
-    print("The input data coming from Infura is empty.")
-    inputs = []
-    params =[]
-
-  else:
-    while inputs is None:
-      try:
-        input_data = '0x' + t['data'][x:]
-        inputs = contract.decode_function_input(input_data)
-        params = inputs[1].values()
-
-        #print(inputs)
-        
-      except ValueError:    
-        x += 8 #or x+=32. NOTE: This removes leading topics (0s) from the input data. Works well in multiples of 8 or 16.
-        
-        if input_data == '0x': #If the string is never able to be read 'decode_function_input' (and it just truncates to 0x)
-          print('Cannot read input data. The input data or ABI may be invalid.', t['data'])
-          x=2
-          raise ValueError # Do I need to raise an error here?
-
-        pass
-
-  methodid = input_data[:10] + '00000000000000000000000000000000000000000000000000000000'
-  return inputs, params, methodid
   
 
 # Return transaction logs or filter the specific type of log you need to return. NOTE: VERIFY THAT THIS IS NOT RETURNING DUPLICATES AND THAT IT'S NOT REMOVING ANYTHING THAT SHOULD BE KEPT
 def read_logs(address, fromBlock, toBlock):   
 
   # If proxy_actions, only find event/function logs that are sent to DSSProxyActions (0x82ecd135dce65fbc6dbdd0e4237e0af93ffd5038)
-  # These can also be found as '0 value internal transactions' on Etherscan, but there is no API calls for it at the moment. Is there a faster way?
   if contract_name == 'proxy_actions':
     t,duplicates = [],[]
 
@@ -251,12 +215,11 @@ contract = w3.eth.contract(address=addresses[0], abi=abi) # Get contracts
 j, dict_evt, dict_fn, dict_sign = get_abi_params(abi, contract_name, w3) # Get ABI parameters (function names, event names, etc.) 
 
 
-
-# Instantiate postgresql_engine or snowflake_engine with variables here.
+# Instantiate postgresql_engine or snowflake_engine here.
 if 1==1:
   snowflake_engine.engine = create_engine(f'snowflake://{snowflake_user}:{snowflake_pwd}@{snowflake_account}/{snowflake_db}') #MAKE THE DATABASE A PARAM
   snowflake_engine.common_columns = "block_number bigint, block_hash string, address string, log_index int, transaction_index int, transaction_hash string"
-  snowflake_engine.type_mapping = {"address": "string", "bytes": "string", "bytes4": "string", "bytes32": "string", "int256": "numeric", "uint256": "numeric", "uint16":"numeric", "bool": "boolean", "address[]":"string", "uint256[]":"numeric", "uint8":"numeric", "string":"string"}
+  snowflake_engine.type_mapping = {"address": "string", "bytes": "string", "bytes4": "string", "bytes32": "string", "int256": "numeric", "uint256": "string", "uint16":"numeric", "bool": "boolean", "address[]":"string", "uint256[]":"string", "uint8":"numeric", "string":"string"} #NOTE: I changed uint256 and uint256[] to string...
   print("Posting to Snowflake")
 
 else:
@@ -281,8 +244,7 @@ while fromBlock < lastBlock:
   toBlock = fromBlock + int(blocksStep)
   if(toBlock > lastBlock):
     toBlock = lastBlock
-  print(f"Fetching events from block {fromBlock} to {toBlock}")
-  print("BlockStep:", blocksStep)
+  print(f"Fetching events from block {fromBlock} to {toBlock}", "\n", "BlockStep:", blocksStep)
   cnt = 0
 
   # Make sure we treat block as atomic so even if it crashes, we only have a full block or none
@@ -290,75 +252,73 @@ while fromBlock < lastBlock:
     for address in addresses:
 
       # Retrieve each log
-      for t in read_logs(address, fromBlock, toBlock): 
+      try:
+        for t in read_logs(address, fromBlock, toBlock): 
 
-        # Construct j based on the topic found in t (methodid)
-        try:
-          j = dict_sign[t.topics[0].hex()]
-          table_name = j["table"] 
-          values = ""
-        except KeyError:
-          pass
-
-        #Decode the input data
-        if j["type"] == "function" and j["stateMutability"] != "view":
+          # Construct j based on the topic found in t (methodid)
           try:
-            inputs, params, methodid = get_function_data(t) 
-            #print("inputs:", inputs, "\n params:", params)
-          except:
-            print("Could not parse input data")
-            raise ValueError("Your input data is probably not readable") #Should we pass here instead?
-         
-          # Replace j if the input data contains the signature/methodid instead of topic 0 ('execute' transactions).
-          if contract_name == 'proxy_actions':
-            print('done this stuff')
-            j = dict_sign[methodid]
-            table_name = j["table"]
+            j = dict_sign[t.topics[0].hex()]
+            table_name = j["table"] 
             values = ""
+          except KeyError:
+            pass
 
-          # Encode functions for SQL
+          #Decode the input data
+          if j["type"] == "function" and j["stateMutability"] != "view":
+            try:
+              inputs, params, methodid = get_function_data(t, contract) 
+              #print("inputs:", inputs, "\n params:", params)
+            except:
+              print("Could not parse input data")
+              raise ValueError("Your input data is probably not readable") #Should we pass here instead?
           
-          try:
-            values = sa.encode_functions(params, values) #this probably shouldn't be in the sqlabstract class
-          except:
-            print('Could not encode parameters: \n','type1', type(params[0]), 'type2', type(params[1]), 'type3', type(params[2]))
-            continue #CONTINUE IF IN LOOP. If it can't encode it, is it okay to write it as it is?
+            # Replace j if the input data contains the signature/methodid instead of topic 0 ('execute' transactions).
+            if contract_name == 'proxy_actions':
+              j = dict_sign[methodid]
+              table_name = j["table"]
+              values = ""
 
-        # Encode events for SQL  
-        elif j["type"] == "event" and j["anonymous"] != True:
-          event_data = eth_event.decode_log(t, eth_event.get_topic_map(abi))
-          values = sa.encode_events(event_data, values)
-        else:
-          continue
+            # Encode functions for SQL
+            try:
+              values = sa.encode_functions(params, values) #this probably shouldn't be in the sqlabstract class
+            except:
+              print('Could not encode parameters: \n','type1', type(params[0]), 'type2', type(params[1]), 'type3', type(params[2]))
+              continue #CONTINUE IF IN LOOP. If it can't encode it, is it okay to write it as it is?
 
-        sa.insert(values)
+          # Encode events for SQL  
+          elif j["type"] == "event" and j["anonymous"] != True:
+            event_data = eth_event.decode_log(t, eth_event.get_topic_map(abi))
+            values = sa.encode_events(event_data, values)
+          else:
+            continue
+          
+          # Insert values
+          sa.insert(values)
+          cnt += 1  
 
-
-      # Manage the blockstep automatically
-
-      if cnt == 0: #If there are 0 insertions in a blockstep, increase the block step
-        blocksStep = blocksStep*1.2
+      # Manage the number of blocks returned by each an Infura query (blockstep) automatically
+      except ValueError as VE: # If the Infura returns a 'too many logs error', decrease the blockstep
+        blocksStep /= 2
+        print(VE, "\n", "New BlockStep:", blocksStep)
+        break
+      
+      if cnt == 0: #If there are 0 insertions in a blockstep, increase the blockstep for the next iteration.
+        blocksStep *= 2
       if cnt > 50: # If there are > 50 insertions in one blockstep, decrease the blockstep.
-        blocksStep = blocksStep/2
-      cnt += 1    
+        blocksStep /= 1.3  
+      
+      # Increase fromBlock for the next iteration
+      fromBlock = toBlock + 1 
 
-      '''
-      except:
-        print('Returned more than 10k results. Trying again.')
-        blocksStep = blocksStep/2
-        pass
-      '''
-
-  fromBlock = toBlock + 1 
-  #print(f"Inserted {cnt} lines into {schema}.{table_name}") # Sometimes there are no insertions when this is printed. #Table name won't be defined if no results are returned with t.
+  print(f"Inserted {cnt} lines into {sa.engine}") # FIX THIS. Sometimes there are no insertions when this is printed. #Table name won't be defined if no results are returned with t.
 
 
 #NOTES
-# 1. Is proxy_actions too slow? If so, how can we speed this up?
+# 1. Double check to see if you actually need eth-blocks.py ??
 # 2. double check flashloan_call (mutable ?)
 # 3. ethereum.transactions
-# 4. handle the 'too many transactions' error
 # 5. Increase all blocksteps to reduce number of infura reads
+# 6. Is it really reading the latest block?
 
 
 '''   
@@ -385,17 +345,6 @@ if addresses == []:
 '''
 
 
-'''
-    for logs in w3.eth.get_logs({'fromBlock': fromBlock, 'toBlock': lastBlock, 'address': address}):  
-      receipt = w3.eth.getTransactionReceipt(logs.transactionHash)['logs'][0]#['data'] #This takes a long time
-      if '82ecd135dce65fbc6dbdd0e4237e0af93ffd5038' in receipt.data:
-      try:
-        receipt = w3.eth.getTransactionReceipt(logs.transactionHash)['logs'][0]['topics'][2].hex()
-        if '82ecd135dce65fbc6dbdd0e4237e0af93ffd5038' in receipt:
-          t.append(receipt)
-      except:
-        pass
-'''
 
   #with engine.connect() as sql:
     #sql.execute(f"CREATE DATABASE IF NOT EXISTS makerdw_dev")
