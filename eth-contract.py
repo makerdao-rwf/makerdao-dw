@@ -85,7 +85,7 @@ class snowflake_engine:
 
   def insert(self, values):
     '''Insert values into Snowflake'''
-    # Prepend common columns: block_number bigint, block_hash bytea, address text, log_index int, transaction_index int, transaction_hash bytea"
+    # Prepend common columns
     values = f"{t.blockNumber}, '{t.blockHash.hex()}', '{t.address}', {t.logIndex}, {t.transactionIndex}, '{t.transactionHash.hex()}' {values}"
     sql_insert = f"""insert into {schema}."{table_name}" values ({values})"""
     print(text(sql_insert))
@@ -124,7 +124,6 @@ class postgresql_engine:
 
   def insert(self, values):
     '''Insert values into Postgresql'''
-    # Prepend common columns: block_number bigint, block_hash bytea, address text, log_index int, transaction_index int, transaction_hash bytea"
     values = f"{t.blockNumber}, '\\{t.blockHash.hex()[1:]}', '\\{t.address[1:]}', {t.logIndex}, {t.transactionIndex}, '\\{t.transactionHash.hex()[1:]}' {values}"
     sql_insert = f"""insert into {schema}."{table_name}" values ({values})"""
     print(text(sql_insert))
@@ -142,10 +141,10 @@ class sqlabstract(snowflake_engine, postgresql_engine): #Change this to change w
       for j in abi:
         if (j["type"] == "function" and j["stateMutability"] != "view") or (j["type"] == "event" and j["anonymous"] != True):
           table_name = j['table']
-          sql_check_table_exists = f"""select max(block_number) from {schema}."{table_name}" """
+          sql_check_table_block = f"""select max(block_number) from {self.db}.{schema}."{table_name}" """ # DBL CHECK. UPPER
 
           try: # Added this try/except. If there isn't a table, then just start at the beginning. IS THERE A NEED FOR eth-blocks.py????
-            max_block = sql.execute(text(sql_check_table_exists)).scalar()
+            max_block = sql.execute(text(sql_check_table_block)).scalar()
             if max_block != None and max_block > fromBlock:
               fromBlock = max_block + 1
           except:
@@ -155,19 +154,18 @@ class sqlabstract(snowflake_engine, postgresql_engine): #Change this to change w
 
   def create_schema (self):
     with self.engine.connect() as sql: # NOTE: ONLY DO THIS ONCE ?
-      sql.execute(text(f"create schema if not exists {schema}")) 
+      #sql.execute(text(f"create schema if not exists {schema}")) #Does this need to be here? I don't think it does...
       for j in abi:
         # Collect all functions and events from the ABI (I think)
         if (j["type"] == "function" and j["stateMutability"] != "view") or (j["type"] == "event" and j["anonymous"] != True):
           table_name = j['table']
           # Create an SQL table for each event/function if it doesn't already exist
-          sql_check_table_exists = f"select count(*) from information_schema.tables where table_schema = '{schema}' and table_name = '{table_name}'"
-          if sql.execute(text(sql_check_table_exists)).scalar() == 0:
+          sql_check_table_exists = f"select exists(select * from {self.db}.information_schema.tables where table_schema = '{schema.lower()}' or table_schema = '{schema.upper()}' and table_name = '{table_name}')" #put this on blcok thing above
+          if sql.execute(text(sql_check_table_exists)).scalar() == False:
             columns = self.common_columns
             unnamed_col_idx = 0
             for i in j["inputs"]:
               col_name = i["name"].lower()
-              print("colname:", col_name)
               if col_name == "":
                 col_name = f"v{unnamed_col_idx}"
                 unnamed_col_idx += 1
@@ -180,6 +178,9 @@ class sqlabstract(snowflake_engine, postgresql_engine): #Change this to change w
             sql_create_table = f"""create table if not exists {schema}."{table_name}" ( {columns} )""" 
             print(sql_create_table)
             sql.execute(text(sql_create_table))
+          else:
+            print('Tables already exist')
+            break
 
   
 
@@ -190,14 +191,16 @@ def read_logs(address, fromBlock, toBlock):
   if contract_name == 'proxy_actions':
     t,duplicates = [],[]
 
+    # NOTE: THIS MAY BE QUICKER: https://infura.io/docs/ethereum/json-rpc/eth-getTransactionReceipt dont think so actually, its the same thing i think
+
     for log in w3.eth.get_logs({'fromBlock': fromBlock, 'toBlock': toBlock, 'address': address}):
       if log.transactionHash.hex() not in duplicates: #remove duplicate transactions
         duplicates.append(log.transactionHash.hex())
-        receipt = w3.eth.getTransactionReceipt(log.transactionHash)['logs'][0]#['data'] 
+        receipt = w3.eth.getTransactionReceipt(log.transactionHash)['logs'][0]#['data'] #Is an infura request made for each transaction?
         if '82ecd135dce65fbc6dbdd0e4237e0af93ffd5038' in receipt.data: 
           t.append(receipt) #Can you make this faster?
           print("Retrieving log ", len(t))
-    
+
     return t
       
   #If we're not finding events from proxy_actions, just read logs normally
@@ -220,12 +223,14 @@ if 1==1:
   snowflake_engine.engine = create_engine(f'snowflake://{snowflake_user}:{snowflake_pwd}@{snowflake_account}/{snowflake_db}') #MAKE THE DATABASE A PARAM
   snowflake_engine.common_columns = "block_number bigint, block_hash string, address string, log_index int, transaction_index int, transaction_hash string"
   snowflake_engine.type_mapping = {"address": "string", "bytes": "string", "bytes4": "string", "bytes32": "string", "int256": "numeric", "uint256": "string", "uint16":"numeric", "bool": "boolean", "address[]":"string", "uint256[]":"string", "uint8":"numeric", "string":"string"} #NOTE: I changed uint256 and uint256[] to string...
+  snowflake_engine.db = snowflake_db
   print("Posting to Snowflake")
 
 else:
   postgresql_engine.engine = create_engine('postgresql://'+db_user+':'+db_password+'@'+db_host+db_port+db_db) 
   postgresql_engine.common_columns = "block_number bigint, block_hash bytea, address bytea, log_index int, transaction_index int, transaction_hash bytea"
   postgresql_engine.type_mapping = {"address": "bytea", "bytes": "bytea", "bytes4": "bytea", "bytes32": "bytea", "int256": "numeric", "uint256": "numeric", "uint16":"numeric", "bool": "boolean", "address[]":"bytea", "uint256[]":"numeric", "uint8":"numeric", "string":"bytea"}
+  postgresql_engine.db = db_db
   print("Posting to Postgresql")
 
 sa = sqlabstract(abi)
@@ -310,7 +315,8 @@ while fromBlock < lastBlock:
       # Increase fromBlock for the next iteration
       fromBlock = toBlock + 1 
 
-  print(f"Inserted {cnt} lines into {sa.engine}") # FIX THIS. Sometimes there are no insertions when this is printed. #Table name won't be defined if no results are returned with t.
+  # Commit is automatically called here bc/ the session has ended
+  print(f"Inserted {cnt} lines into {sa.engine}")
 
 
 #NOTES
@@ -318,7 +324,6 @@ while fromBlock < lastBlock:
 # 2. double check flashloan_call (mutable ?)
 # 3. ethereum.transactions
 # 5. Increase all blocksteps to reduce number of infura reads
-# 6. Is it really reading the latest block?
 
 
 '''   
@@ -343,11 +348,3 @@ if addresses == []:
   toBlock = fromBlock + 1
   # Sample response: AttributeDict({'address': '0x875773784Af8135eA0ef43b5a374AaD105c5D39e', 'blockHash': HexBytes('0x500e9107ee7757e683b8420f94897dcbee789761fe0949f5f9374c262afc8725'), 'blockNumber': 12801059, 'data': '0x00000000000000000000000000000000000000000000002a9bf0f397f1080000', 'logIndex': 0, 'removed': False, 'topics': [HexBytes('0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'), HexBytes('0x000000000000000000000000031f71b5369c251a6544c41ce059e6b3d61e42c6'), HexBytes('0x000000000000000000000000275da8e61ea8e02d51edd8d0dc5c0e62b4cdb0be')], 'transactionHash': HexBytes('0x558a88ca3fe10e02de0730844f6ae55708f0b498b9527257783be0986d17d995'), 'transactionIndex': 0})
 '''
-
-
-
-  #with engine.connect() as sql:
-    #sql.execute(f"CREATE DATABASE IF NOT EXISTS makerdw_dev")
-    #sql.execute(f"USE DATABASE makerdw_dev") 
-    #sql.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
-    #sql.execute(f"USE SCHEMA {schema}")

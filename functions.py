@@ -63,7 +63,7 @@ def get_abi(address, schema, contract_name):
   
   return address, abi
   '''
-# Feature? Permanently save the proxy contract and address combination to SQL. Read from there first before doing the above function.
+# Permanently save the proxy contract abi to the .abi file
 
 
 
