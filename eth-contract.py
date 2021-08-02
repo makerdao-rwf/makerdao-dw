@@ -37,7 +37,7 @@ conf = ConfigFactory.parse_file('config.conf')
 
 ## Environment parameters
 infura_key = conf["infura_key"]
-fromBlock = conf["contracts"][schema][contract_name]["creationBlock"]
+creationBlock = conf["contracts"][schema][contract_name]["creationBlock"]
 
 # Number of blocks per call (too big can lead to errors, too low can be too long)
 blocksStep = conf.get(f"contracts.{schema}.{contract_name}.blocksStep", conf["blocksStep"])
@@ -86,7 +86,7 @@ class SqlEngine:
 
           try: # Added this try/except. If there isn't a table, then just start at the beginning. IS THERE A NEED FOR eth-blocks.py????
             max_block = self.execute(text(sql_check_table_block)).scalar()
-            if max_block != None and max_block > fromBlock:
+            if max_block != None and max_block >= fromBlock:
               fromBlock = max_block + 1
           except:
             fromBlock = conf["contracts"][schema][contract_name]["creationBlock"]
@@ -253,7 +253,7 @@ engine = create_engine(abi, db_driver, db_host, db_user, db_password, db_db, db_
 
 
 # Get latest block and create a schema
-fromBlock = engine.get_latest_block(fromBlock)
+fromBlock = engine.get_latest_block(creationBlock)
 engine.create_schema()
 
 
