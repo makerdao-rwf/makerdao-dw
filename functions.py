@@ -4,7 +4,21 @@ import time
 import snowflake.connector as sf
 import eth_event
 import os
+import argparse
+from pyhocon import ConfigFactory
 
+def get_schema_and_contract():
+  parser = argparse.ArgumentParser(description='Parse a contract on the Ethereum blockchain and store logs on a database.')
+  parser.add_argument('contract', help='name of the contract to parse like makermcd.vat (<schema>.<contract>)')
+  args = parser.parse_args()
+
+  schema, contract_name = args.contract.split(".")
+  print(f"Parsing contract {schema}.{contract_name}")
+  return schema, contract_name
+
+def get_conf():
+  conf = ConfigFactory.parse_file('config.conf')
+  return conf
 
 def get_abi(address, schema, contract_name):
   # Check to see if the address has a corresponding ABI
