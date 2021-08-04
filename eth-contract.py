@@ -28,12 +28,100 @@ db_host = conf["db.host"]
 db_user = conf["db.user"]
 db_password = conf["db.password"]
 db_db = conf["db.database"]
+<<<<<<< HEAD
 db_port = conf["db.port"] 
 db_account = conf["db.account"]
 db_warehouse = conf["db.warehouse"]
 addresses = conf["contracts"][schema][contract_name]["addresses"]
+=======
+db_port = conf["db.port"]
+db_driver = conf["db.driver"] # snowflake or postgresql 
+addresses = conf["contracts"][schema][contract_name]["addresses"]
+
+print("Addresses: ", addresses)
 
 
+
+class SqlEngine:
+
+  # engine var should be defined by the subclasses otherwise it will crash
+  # common_columns var should be defined by the subclasses otherwise it will crash
+  # type_mapping var should be defined by the subclasses otherwise it will crash
+  
+  def __init__(self, abi):
+    self.abi = abi
+
+  # TO BE DEFINED in the implementation
+  def connect(self):
+    return self.engine.connect()
+
+  ## Start a transaction - TO BE DEFINED in the implementation
+  def begin(self):
+    return sessionmaker(self.engine).begin()
+
+  ## Start a transaction - TO BE DEFINED in the implementation
+  def execute(self, sql):
+    return self.engine.execute(sql)
+
+  def get_latest_block (self, fromBlock):
+    '''find the last blocknumber in the database for this contract. NOTE: DO with eth-blocks afterwards'''
+    with self.engine.connect() as sql:
+      for j in abi:
+        if (j["type"] == "function" and j["stateMutability"] != "view") or (j["type"] == "event" and j["anonymous"] != True):
+          table_name = j['table']
+          sql_check_table_block = f"""select max(block_number) from {self.db}.{schema}."{table_name}" """ # DBL CHECK. UPPER
+
+          try: # Added this try/except. If there isn't a table, then just start at the beginning. IS THERE A NEED FOR eth-blocks.py????
+            max_block = self.execute(text(sql_check_table_block)).scalar()
+            if max_block != None and max_block >= fromBlock:
+              fromBlock = max_block + 1
+          except:
+            fromBlock = conf["contracts"][schema][contract_name]["creationBlock"]
+      
+      return fromBlock
+
+  def create_schema (self):
+    with self.connect() as sql: # NOTE: ONLY DO THIS ONCE ?
+      #sql.execute(text(f"create schema if not exists {schema}")) #Does this need to be here? I don't think it does...
+      for j in abi:
+        # Collect all functions and events from the ABI (I think)
+        if (j["type"] == "function" and j["stateMutability"] != "view") or (j["type"] == "event" and j["anonymous"] != True):
+          table_name = j['table']
+          # Create an SQL table for each event/function if it doesn't already exist
+          sql_check_table_exists = f"select exists(select * from {self.db}.information_schema.tables where table_schema = '{schema.lower()}' or table_schema = '{schema.upper()}' and table_name = '{table_name}')" #put this on blcok thing above
+          if self.execute(text(sql_check_table_exists)).scalar() == False:
+            columns = self.common_columns
+            unnamed_col_idx = 0
+            for i in j["inputs"]:
+              col_name = i["name"].lower()
+              if col_name == "":
+                col_name = f"v{unnamed_col_idx}"
+                unnamed_col_idx += 1
+              try:
+                columns += ', "'+col_name+'"' + " " + self.type_mapping[i["type"]] #map the type from the ABI to the sql type in the 'type_mapping' dict
+                print("sql columns:", columns)
+              except KeyError:
+                print("There is probably an unsupported datatype You can add more to the type_mapping dict above")
+                raise
+            sql_create_table = f"""create table if not exists {schema}."{table_name}" ( {columns} )""" 
+            print(sql_create_table)
+            sql.execute(text(sql_create_table))
+          else:
+            print('Tables already exist')
+            break
+        
+
+
+class SnowflakeEngine(SqlEngine):
+  def __init__ (self, abi, host, user, password, database, port):
+    super.__init__(abi)
+    self.engine = create_engine(f'snowflake://{user}:{password}@{host}:{port}/{database}')
+    self.common_columns = "block_number bigint, block_hash string, address string, log_index int, transaction_index int, transaction_hash string"
+    self.type_mapping = {"address": "string", "bytes": "string", "bytes4": "string", "bytes32": "string", "int256": "numeric", "uint256": "string", "uint16":"numeric", "bool": "boolean", "address[]":"string", "uint256[]":"string", "uint8":"numeric", "string":"string"} #NOTE: I changed uint256 and uint256[] to string...
+>>>>>>> 13b42416adf8b725e05eca86909dd6426b70210b
+
+
+<<<<<<< HEAD
 print("Addresses: ", addresses)
 
 # Initialize Infura and contract data
@@ -43,6 +131,81 @@ addresses = [w3.toChecksumAddress(a) for a in addresses] # Get addresses
 contract = w3.eth.contract(address=addresses[0], abi=abi) # Get contracts
 j, dict_evt, dict_fn, dict_sign = get_abi_params(abi, contract_name, w3) # Get ABI parameters (function names, event names, etc.) 
 
+=======
+    return values
+
+  def encode_events(self, event_data, values):
+    '''Encode event parameters for Snowflake'''
+    for idx, event_param in enumerate(event_data["data"]):
+      value = event_param["value"]
+      if isinstance(value, bytes):
+        values += ", '" + value.hex() + "'"
+      else:
+        values += ", " + "'" + str(value)+ "'"
+
+    return values
+
+  def insert(self, values):
+    '''Insert values into Snowflake'''
+    # Prepend common columns
+    values = f"{t.blockNumber}, '{t.blockHash.hex()}', '{t.address}', {t.logIndex}, {t.transactionIndex}, '{t.transactionHash.hex()}' {values}"
+    sql_insert = f"""insert into {schema}."{table_name}" values ({values})"""
+    print(text(sql_insert))
+    session.execute(text(sql_insert))
+
+
+
+class PostgresqlEngine(SqlEngine):
+  def __init__ (self, abi, host, user, password, database, port):
+    super.__init__(abi)
+    self.engine = create_engine(f'postgresql://{user}:{password}@{host}:{port}/{database}')
+    self.common_columns = "block_number bigint, block_hash bytea, address bytea, log_index int, transaction_index int, transaction_hash bytea"
+    self.type_mapping = {"address": "bytea", "bytes": "bytea", "bytes4": "bytea", "bytes32": "bytea", "int256": "numeric", "uint256": "numeric", "uint16":"numeric", "bool": "boolean", "address[]":"bytea", "uint256[]":"numeric", "uint8":"numeric", "string":"bytea"}
+
+
+  def encode_functions(self, params, values):
+    '''Encode Function parameters for Postgresql''' 
+    for idx, value in enumerate(params):    
+      if j["inputs"][idx]["type"] == "address": # Addresses are given as string but converted to binary array for space considerations
+        values += ", '\\" + value[1:] + "'"
+      elif isinstance(value, str): # returns true if value is a string
+        values += ", '" + str(value) +"'"
+      elif isinstance(value, bytes):
+        values += ", '\\x" + value.hex() + "'"
+      else:
+        values += ", " + str(value)
+    return values
+
+  def encode_events(self, event_data, values):
+    '''Encode Event parameters for Postgresql'''
+    for idx, event_param in enumerate(event_data["data"]):
+      value = event_param["value"]
+      if j["inputs"][idx]["type"] == "address": # Addresses are given in string but converted to binary array for space considerations
+        values += ", '\\" + value[1:] + "'"
+      elif isinstance(value, str):
+        values += ", '" + str(value) +"'"
+      elif isinstance(value, bytes):
+        values += ", '\\x" + value.hex()[1:]+ "'"
+      else:
+        values += ", " + str(value)
+    return values
+
+  def insert(self, values):
+    '''Insert values into Postgresql'''
+    values = f"{t.blockNumber}, '\\{t.blockHash.hex()[1:]}', '\\{t.address[1:]}', {t.logIndex}, {t.transactionIndex}, '\\{t.transactionHash.hex()[1:]}' {values}"
+    sql_insert = f"""insert into {schema}."{table_name}" values ({values})"""
+    print(text(sql_insert))
+    session.execute(text(sql_insert))
+
+def create_engine(abi, db_driver, db_host, db_user, db_password, db_db, db_port):
+  if db_driver == "snowflake":
+    return SnowflakeEngine(abi, db_driver, db_host, db_user, db_password, db_db, db_port)
+  elif db_driver == "postgresql":
+   return PostgresqlEngine(abi, db_host, db_user, db_password, db_db, db_port)
+  else:
+   return None
+  
+>>>>>>> 13b42416adf8b725e05eca86909dd6426b70210b
 
 # Return transaction logs or filter the specific type of log you need to return. NOTE: VERIFY THAT THIS IS NOT RETURNING DUPLICATES AND THAT IT'S NOT REMOVING ANYTHING THAT SHOULD BE KEPT
 def read_logs(address, fromBlock, toBlock):   
@@ -64,6 +227,7 @@ def read_logs(address, fromBlock, toBlock):
   else:
     t = w3.eth.get_logs({'fromBlock': fromBlock, 'toBlock': toBlock, 'address': address})
     return t
+<<<<<<< HEAD
     
 # Create SQL Alchemy Engine
 try:
@@ -71,10 +235,30 @@ try:
 except:
   print("Verify that template.conf is setup correctly. There should be no empty fields.")
   raise ValueError()
+=======
+
+
+# Set w3 source to Infura Mainnet and init contract
+w3 = Web3(Web3.HTTPProvider('https://mainnet.infura.io/v3/' + infura_key)) 
+
+address, abi = get_abi(addresses[0], schema, contract_name) #get ABI from the first address (it should work on all addresses).
+addresses = [w3.toChecksumAddress(a) for a in addresses] # Get addresses
+contract = w3.eth.contract(address=addresses[0], abi=abi) # Get contracts
+j, dict_evt, dict_fn, dict_sign = get_abi_params(abi, contract_name, w3) # Get ABI parameters (function names, event names, etc.) 
+
+
+engine = create_engine(abi, db_driver, db_host, db_user, db_password, db_db, db_port)
+  # die with an exception
+
+>>>>>>> 13b42416adf8b725e05eca86909dd6426b70210b
 
 # Get latest block and create a schema
 fromBlock = engine.get_latest_block(creationBlock)
 engine.create_schema()
+<<<<<<< HEAD
+=======
+
+>>>>>>> 13b42416adf8b725e05eca86909dd6426b70210b
 
 # Start Reading transactions
 print(f"Start from block {fromBlock}")
@@ -127,26 +311,39 @@ while fromBlock < lastBlock:
 
             # Encode functions for SQL
             try:
+<<<<<<< HEAD
               start4=time.time()
               engine.encode_functions(j, params, values) # Better to start with SqlEngine ?
               end4 = time.time()
               print("TIME encode events:", start4-end4)
+=======
+              values = engine.encode_functions(params, values) #this probably shouldn't be in the sqlabstract class
+>>>>>>> 13b42416adf8b725e05eca86909dd6426b70210b
             except:
               print('Could not encode parameters: \n','type1', type(params[0]), 'type2', type(params[1]), 'type3', type(params[2]))
               continue #CONTINUE IF IN LOOP. If it can't encode it, is it okay to write it as it is?
 
           # If the signature in t is an event, decode log and encode data for SQL  
           elif j["type"] == "event" and j["anonymous"] != True:
+<<<<<<< HEAD
             event_data = eth_event.decode_log(t, eth_event.get_topic_map(abi)) #change event_data to params?
             engine.encode_events(j, event_data, values)
+=======
+            event_data = eth_event.decode_log(t, eth_event.get_topic_map(abi))
+            values = engine.encode_events(event_data, values)
+>>>>>>> 13b42416adf8b725e05eca86909dd6426b70210b
           else:
             continue
           
           # Insert values
+<<<<<<< HEAD
           start3 = time.time()
           sql_insert = engine.insert(t, table_name, session) #SEVERELY IMPACTING SPEED. Is it faster to pass session?
           end3 = time.time()
           print("TIME insert:", end3 - start3)
+=======
+          engine.insert(values)
+>>>>>>> 13b42416adf8b725e05eca86909dd6426b70210b
           cnt += 1  
 
       # Manage the number of blocks returned by each an Infura query (blockstep) automatically
