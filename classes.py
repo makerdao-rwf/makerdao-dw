@@ -10,16 +10,6 @@ from functions import get_conf, get_schema_and_contract
 schema, contract_name = get_schema_and_contract()
 conf = get_conf()
 
-
-def start_engine(abi, db_driver, db_host, db_user, db_password, db_account, db_db, db_port):
-  if db_driver == "snowflake":
-    return SnowflakeEngine(abi, db_user, db_password, db_account, db_db)
-  elif db_driver == "postgresql":
-    return PostgresqlEngine(abi, db_host, db_user, db_password, db_db, db_port)
-  else:
-    print("Please verify that your driver is named either 'snowflake' or 'postgresql' in template.conf")
-    return None
-
     
 class SqlEngine:
   '''Retrieves latest blocks and creates db tables if none exist'''
@@ -30,15 +20,15 @@ class SqlEngine:
   # engine var,common_columns, and type_mapping should be defined by the subclasses otherwise it will crash. 
   # What is meant by this comment? These are always defined. If engine cannot be initialized, it should crash.
 
-  # TO BE DEFINED in the implementation. DO YOU NEED THESE?
+  # Connect to the sqlalchemy engine
   def connect(self):
     return self.engine.connect()
 
-  ## Start a transaction - TO BE DEFINED in the implementation
+  ## Create a sessionmaker object and run engine.begin().
   def begin(self):
     return sessionmaker(self.engine).begin()
 
-  ## Start a transaction - TO BE DEFINED in the implementation
+  ## Execute a transaction
   def execute(self, sql):
     return self.engine.execute(sql)
 
@@ -86,7 +76,6 @@ class SqlEngine:
             sql_create_table = f"""create table if not exists {schema}."{table_name}" ( {columns} )""" 
             print(sql_create_table)
             self.execute(text(sql_create_table))
-            #self.execute(text(sql_create_table))
           else:
             print('Tables already exist')
             break
@@ -127,10 +116,10 @@ class SnowflakeEngine(SqlEngine):
     sql_insert = f"""insert into {schema}."{table_name}" values ({values})"""
     print(text(sql_insert))
 
-    start = time.time()
-    session.execute(text(sql_insert)) #There might be a faster way?
-    end = time.time()
-    print("TIME insert:", end - start)
+    #start = time.time()
+    session.execute(text(sql_insert)) #There might be a faster way? self.execute() is 2-3x slower.
+    #end = time.time()
+    #print("TIME insert:", end - start)
 
 
 
@@ -175,3 +164,16 @@ class PostgresqlEngine(SqlEngine):
     sql_insert = f"""insert into {schema}."{table_name}" values ({values})"""
     print(text(sql_insert))
     session.execute(text(sql_insert))
+
+
+
+
+def start_engine(abi, db_driver, db_host, db_user, db_password, db_account, db_db, db_port):
+  ''' A function to initialize either the SnowflakeEngine class or PostgresqlEngine class '''
+  if db_driver == "snowflake":
+    return SnowflakeEngine(abi, db_user, db_password, db_account, db_db)
+  elif db_driver == "postgresql":
+    return PostgresqlEngine(abi, db_host, db_user, db_password, db_db, db_port)
+  else:
+    print("Please verify that your driver is named either 'snowflake' or 'postgresql' in template.conf")
+    return None
