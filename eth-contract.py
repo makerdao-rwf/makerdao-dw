@@ -110,17 +110,17 @@ while fromBlock < lastBlock:
               table_name = j["table"]
               values = ""
 
-            # Encode functions for SQL
+            # Encode function data for SQL
             try:
-              engine.encode_functions(j, params, values) # Better to start with SqlEngine ?
+              engine.encode_functions(j, params, values)
             except:
               print('Could not encode parameters: \n','type1', type(params[0]), 'type2', type(params[1]), 'type3', type(params[2]))
               continue #CONTINUE IF IN LOOP. If it can't encode it, is it okay to write it as it is?
 
-          # If the signature in t is an event, decode log and encode data for SQL  
+          # If the signature in t is an event, decode log and encode the result for SQL  
           elif j["type"] == "event" and j["anonymous"] != True:
-            event_data = eth_event.decode_log(t, eth_event.get_topic_map(abi)) #change event_data to params?
-            engine.encode_events(j, event_data, values)
+            params = eth_event.decode_log(t, eth_event.get_topic_map(abi))
+            engine.encode_events(j, params, values)
           else:
             continue
           

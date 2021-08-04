@@ -3,7 +3,6 @@ import time
 from sqlalchemy import text
 from datetime import datetime
 
-
 from classes import start_engine
 from functions import get_conf
 
@@ -11,7 +10,6 @@ from functions import get_conf
 # Get Parameters
 conf = get_conf()
 infura_key = conf["infura_key"]
-
 db_driver = conf["db.driver"] # snowflake or postgresql
 db_host = conf["db.host"]
 db_user = conf["db.user"]
@@ -20,7 +18,6 @@ db_db = conf["db.database"]
 db_port = conf["db.port"] 
 db_account = conf["db.account"]
 db_warehouse = conf["db.warehouse"]
-
 schema = "ethereum"
 table_name = "transactions"
 creationBlock = conf["contracts"][schema][table_name]["creationBlock"]
@@ -34,10 +31,8 @@ except:
   print("The postgresql/snowflake engine could not be initialized. Verify that template.conf is setup correctly. There should be no empty fields.")
   raise ValueError()
 
-
 # Set w3 source to Infura Mainnet
 w3 = Web3(Web3.HTTPProvider('https://mainnet.infura.io/v3/' + infura_key)) 
-
 
 # Get latest block number and create schema
 fromBlock = engine.get_latest_block(creationBlock)

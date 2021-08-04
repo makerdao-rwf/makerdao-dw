@@ -10,13 +10,12 @@ conf = get_conf()
 
     
 class SqlEngine:
-  '''Retrieves latest blocks and creates db tables if none exist'''
 
   def __init__(self, abi):
     self.abi = abi
 
   # engine var,common_columns, and type_mapping should be defined by the subclasses otherwise it will crash. 
-  # What is meant by this comment? These are always defined. If engine cannot be initialized, it should crash.
+  # ??? These are always defined. If engine cannot be initialized, it will crash.
 
   # Connect to the sqlalchemy engine
   def connect(self):
@@ -31,8 +30,10 @@ class SqlEngine:
     return self.engine.execute(sql)
 
   def get_latest_block(self, fromBlock):
+    '''Find the last blocknumber in the database for this contract.'''
+
     print('Connected to', self.engine)
-    '''find the last blocknumber in the database for this contract. NOTE: DO with eth-blocks afterwards'''
+
     with self.connect(): 
       for j in self.abi:
         if (j["type"] == "function" and j["stateMutability"] != "view") or (j["type"] == "event" and j["anonymous"] != True):
@@ -49,12 +50,16 @@ class SqlEngine:
       return fromBlock
 
   def create_schema (self):
-    with self.connect() as sql: # NOTE: ONLY DO THIS ONCE ?
-      self.execute(text(f"create schema if not exists {schema}")) #Does this need to be here? I don't think it does...
+    ''' Add a schema and event/function tables to database '''
+
+    with self.connect() as sql:
+      self.execute(text(f"create schema if not exists {schema}"))
       for j in self.abi:
-        # Collect all functions and events from the ABI (I think)
+
+        # Collect all functions and events from the ABI to use as table names
         if (j["type"] == "function" and j["stateMutability"] != "view") or (j["type"] == "event" and j["anonymous"] != True):
           table_name = j['table']
+
           # Create an SQL table for each event/function if it doesn't already exist
           sql_check_table_exists = f"select exists(select * from {self.db}.information_schema.tables where table_schema = '{schema.lower()}' or table_schema = '{schema.upper()}' and table_name = '{table_name}')" #put this on blcok thing above
           if self.execute(text(sql_check_table_exists)).scalar() == False:
@@ -65,12 +70,15 @@ class SqlEngine:
               if col_name == "":
                 col_name = f"v{unnamed_col_idx}"
                 unnamed_col_idx += 1
+
+              # Initialize each column's SQL datatype by mapping the type specified in the ABI ('type_mapping' dict)
               try:
-                columns += ', "'+col_name+'"' + " " + self.type_mapping[i["type"]] #map the type from the ABI to the sql type in the 'type_mapping' dict
-                #print("sql columns:", columns)
+                columns += ', "'+col_name+'"' + " " + self.type_mapping[i["type"]]
               except KeyError:
                 print("There is probably an unsupported datatype. You can add more to the type_mapping dict above")
                 raise
+            
+            # Create the table
             sql_create_table = f"""create table if not exists {schema}."{table_name}" ( {columns} )""" 
             print(sql_create_table)
             self.execute(text(sql_create_table))
