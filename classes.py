@@ -1,8 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.orm import Session
 from sqlalchemy import text
-import time
 
 from functions import get_conf, get_schema_and_contract
 
@@ -115,7 +113,6 @@ class SnowflakeEngine(SqlEngine):
     values = f"{t.blockNumber}, '{t.blockHash.hex()}', '{t.address}', {t.logIndex}, {t.transactionIndex}, '{t.transactionHash.hex()}' {self.values}"
     sql_insert = f"""insert into {schema}."{table_name}" values ({values})"""
     print(text(sql_insert))
-
     #start = time.time()
     session.execute(text(sql_insert)) #There might be a faster way? self.execute() is 2-3x slower.
     #end = time.time()

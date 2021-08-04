@@ -1,9 +1,6 @@
 import json
 import requests
-import time
-import snowflake.connector as sf
 import eth_event
-import os
 import argparse
 from pyhocon import ConfigFactory
 

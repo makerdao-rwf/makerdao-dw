@@ -125,7 +125,7 @@ while fromBlock < lastBlock:
             continue
           
           # Insert values
-          sql_insert = engine.insert(t, table_name, session) 
+          engine.insert(t, table_name, session) 
           cnt += 1  
 
       # Manage the number of blocks returned by each an Infura query (blockstep) automatically
