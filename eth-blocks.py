@@ -1,7 +1,5 @@
 from web3 import Web3
 import time
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text
 from datetime import datetime
 
@@ -44,7 +42,7 @@ w3 = Web3(Web3.HTTPProvider('https://mainnet.infura.io/v3/' + infura_key))
 # Get latest block number and create schema
 fromBlock = engine.get_latest_block(creationBlock)
 
-
+# Initialize unique column datatypes for postgresql and snowflake
 if db_driver == 'postgresql':
   columns = "block_number bigint, block_hash bytea, miner bytea, nonce bytea, gas_limit bigint, gas_used bigint, difficulty bigint, extra_data bytea, time timestamp, size bigint"
   type_mapping = {"address": "bytea", "bytes": "bytea", "bytes4": "bytea", "bytes32": "bytea", "int256": "numeric", "uint256": "numeric"}
@@ -52,10 +50,8 @@ elif db_driver == 'snowflake':
   columns = "block_number bigint, block_hash string, miner string, nonce string, gas_limit bigint, gas_used bigint, difficulty bigint, extra_data string, time timestamp, size bigint"
   type_mapping = {"address": "string", "bytes": "string", "bytes4": "string", "bytes32": "string", "int256": "numeric", "uint256": "string", "uint16":"numeric", "bool": "boolean", "address[]":"string", "uint256[]":"string", "uint8":"numeric", "string":"string"} #NOTE: I changed uint256 and uint256[] to string...
   
+# Create schema and table if they don't exist already
 with engine.connect() as sql:
-    '''  sql_check_table_exists = f"select count(*) from information_schema.tables where table_schema = '{schema}' and table_name = '{table_name}'"
-    print(sql_check_table_exists)
-    if sql.execute(text(sql_check_table_exists)).scalar() == 0:'''
     sql_create_table = f"""create table if not exists {schema}."{table_name}" ( {columns} )"""
     sql_create_schema = f"""create schema if not exists {schema}"""
     sql.execute(text(sql_create_schema))
@@ -64,13 +60,9 @@ with engine.connect() as sql:
 
 print(f"Start from block {fromBlock}")
 
-# Get most recent block
-lastBlock = w3.eth.block_number
-cnt = 0
-
 # Init column types and insert values into table
-while fromBlock < lastBlock:
-  with sessionmaker(engine).begin() as session: 
+while fromBlock < w3.eth.block_number:
+  with engine.begin() as session: 
     block = w3.eth.get_block(fromBlock, full_transactions = False)
     block_number = block["number"]
     block_hash = block["hash"] # HexBytes
@@ -83,11 +75,13 @@ while fromBlock < lastBlock:
     time = datetime.fromtimestamp(block["timestamp"])
     size = block["size"]
 
+    # Encode input values differently for postgresql and snowflake
     if db_driver == "postgresql":
       sql_insert = f"""insert into {schema}."{table_name}" values ({block_number}, '\\{block_hash.hex()[1:]}', '\\{miner[1:]}', '\\{nonce.hex()[1:]}', {gas_limit}, {gas_used}, {difficulty}, '\\{extra_data.hex()[1:]}', '{time}', {size})"""
     elif db_driver == "snowflake":
       sql_insert = f"""insert into {schema}."{table_name}" values ({block_number}, '{block_hash.hex()}', '{miner}', '{nonce.hex()}', {gas_limit}, {gas_used}, {difficulty}, '{extra_data.hex()}', '{time}', {size})"""
     
+    # Insert values
     session.execute(text(sql_insert))
     print(text(sql_insert))
 

@@ -2,6 +2,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+import time
 
 from functions import get_conf, get_schema_and_contract
 
@@ -48,9 +49,9 @@ class SqlEngine:
       for j in self.abi:
         if (j["type"] == "function" and j["stateMutability"] != "view") or (j["type"] == "event" and j["anonymous"] != True):
           table_name = j['table']
-          sql_check_table_block = f"""select max(block_number) from {self.db}.{schema}."{table_name}" """ # DBL CHECK. UPPER
+          sql_check_table_block = f"""select max(block_number) from {self.db}.{schema}."{table_name}" """
 
-          try: # Added this try/except. If there isn't a table, then just start at the beginning. IS THERE A NEED FOR eth-blocks.py????
+          try: # Added this try/except. If there isn't a table, then just start at the beginning. 
             max_block = self.execute(text(sql_check_table_block)).scalar()
             if max_block != None and max_block >= fromBlock:
               fromBlock = max_block + 1
@@ -125,14 +126,18 @@ class SnowflakeEngine(SqlEngine):
     values = f"{t.blockNumber}, '{t.blockHash.hex()}', '{t.address}', {t.logIndex}, {t.transactionIndex}, '{t.transactionHash.hex()}' {self.values}"
     sql_insert = f"""insert into {schema}."{table_name}" values ({values})"""
     print(text(sql_insert))
-    session.execute(text(sql_insert)) # Why is this twice as quick as self.execute()?
+
+    start = time.time()
+    session.execute(text(sql_insert)) #There might be a faster way?
+    end = time.time()
+    print("TIME insert:", end - start)
 
 
 
 class PostgresqlEngine(SqlEngine):
   def __init__ (self, abi, host, user, password, db, port):
     super().__init__(abi)
-    self.engine = create_engine(f'postgresql://{user}:{password}@{host}{port}{db}')
+    self.engine = create_engine(f'postgresql://{user}:{password}@{host}{port}{db}') #echo=True to show all sql queries
     self.db = db
     self.common_columns = "block_number bigint, block_hash bytea, address bytea, log_index int, transaction_index int, transaction_hash bytea"
     self.type_mapping = {"address": "bytea", "bytes": "bytea", "bytes4": "bytea", "bytes32": "bytea", "int256": "numeric", "uint256": "numeric", "uint16":"numeric", "bool": "boolean", "address[]":"bytea", "uint256[]":"numeric", "uint8":"numeric", "string":"bytea"}
