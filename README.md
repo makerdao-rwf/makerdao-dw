@@ -38,7 +38,7 @@ Configuration is managed in [HOCON format](https://github.com/chimpler/pyhocon) 
 
 The following command will update the ethereum.blocks table (and create the schema/table if needed).
 
-    python eth-blocks.py 
+    python eth-blocks.py ethereum.transactions
 
 The table will have the following format:
 

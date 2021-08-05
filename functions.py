@@ -1,10 +1,21 @@
 import json
 import requests
-import time
-import snowflake.connector as sf
 import eth_event
-import os
+import argparse
+from pyhocon import ConfigFactory
 
+def get_schema_and_contract():
+  parser = argparse.ArgumentParser(description='Parse a contract on the Ethereum blockchain and store logs on a database.')
+  parser.add_argument('contract', help='name of the contract to parse like makermcd.vat (<schema>.<contract>)')
+  args = parser.parse_args()
+
+  schema, contract_name = args.contract.split(".")
+  print(f"Parsing contract {schema}.{contract_name}")
+  return schema, contract_name
+
+def get_conf():
+  conf = ConfigFactory.parse_file('config.conf')
+  return conf
 
 def get_abi(address, schema, contract_name):
   # Check to see if the address has a corresponding ABI
@@ -77,11 +88,11 @@ def get_abi_params(abi, contract_name, w3):
     if j["type"] == "function" and j["stateMutability"] != "view":
       fn_name = j["name"].lower() 
       signature = '{}({})'.format(j['name'],','.join([input['type'] for input in j['inputs']]))
-      #print(j['name'],','.join([input['type'] for input in j['inputs']]))
+      
       # Functions signature use the 4 first bytes of the sha3 then 0
       j["signature"] = w3.sha3(text=signature)[0:4].hex() + '00000000000000000000000000000000000000000000000000000000'
-
       # print(f"{j['name']}   {signature}   {j['signature']}")
+
       # If the name already exists, we add an index starting by 0 at the end of the function
       if fn_name in dict_fn:
         j["table"] = contract_name + "_call_" + fn_name + str(dict_fn[fn_name])
@@ -130,7 +141,7 @@ def get_function_data(t, contract):
         if input_data == '0x': #If the string is never able to be read 'decode_function_input' (and it just truncates to 0x)
           print('Cannot read input data. The input data or ABI may be invalid.', t['data'])
           x=2
-          raise ValueError # Do I need to raise an error here?
+          raise ValueError
 
         pass
 
