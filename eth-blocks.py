@@ -19,12 +19,10 @@ from sqlalchemy import text
 import eth_event
 from pyhocon import ConfigFactory
 from datetime import datetime
-
-
 import argparse
 
-parser = argparse.ArgumentParser(description='Parse and store Ethereum blocks on a database.')
 
+parser = argparse.ArgumentParser(description='Parse and store Ethereum blocks on a database.')
 
 conf = ConfigFactory.parse_file('config.conf')
 
@@ -37,15 +35,14 @@ db_user = conf["db.user"]
 db_password = conf["db.password"]
 db_db = conf["db.database"]
 
-
 schema = "ethereum"
 table_name = "blocks"
 
-fromBlock = 0 # We start from block 0 if the database is empty
+#fromBlock = 0 # We start from block 0 if the database is empty
+fromBlock = 12739668 #temporarily grab only latest few blocks
 
 # Connect to PostgreSQL
 engine = create_engine('postgresql://'+db_user+':'+db_password+'@'+db_host+':5432/'+db_db) 
-
 
 
 # Set w3 source to Infura Mainnet
@@ -54,7 +51,6 @@ w3 = Web3(Web3.HTTPProvider('https://mainnet.infura.io/v3/' + infura_key))
 
 # create all tables if needed
 columns = "block_number bigint, block_hash bytea, miner bytea, nonce bytea, gas_limit bigint, gas_used bigint, difficulty bigint, extra_data bytea, time timestamp, size bigint"
-
 type_mapping = {"address": "bytea", "bytes": "bytea", "bytes4": "bytea", "bytes32": "bytea", "int256": "numeric", "uint256": "numeric"}
 
 with engine.connect() as sql:
@@ -74,11 +70,11 @@ with engine.connect() as sql:
 
 print(f"Start from block {fromBlock}")
 
-
+# Get most recent block
 lastBlock = w3.eth.block_number
 
 
-
+# Init column types and insert values into table
 while fromBlock < lastBlock:
   with sessionmaker(engine).begin() as session: 
     block = w3.eth.get_block(fromBlock, full_transactions = False)
